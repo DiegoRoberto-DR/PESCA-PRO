@@ -1,0 +1,6 @@
+{
+  "name": "PescaEsporte",
+  "description": "Plataforma completa de campeonatos de pesca online com envio de fotos de capturas, ranking em tempo real e avaliação e identificação automática de espécies por IA.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
