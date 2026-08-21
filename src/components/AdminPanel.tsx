@@ -38,9 +38,16 @@ import {
   Sparkles,
   AlertOctagon,
   Eye,
-  CheckSquare
+  CheckSquare,
+  MessageCircle,
+  ExternalLink,
+  Share2,
+  Receipt,
+  Ticket,
+  Send,
+  RefreshCw
 } from 'lucide-react';
-import { Catch, Tournament, UserProfile } from '../types';
+import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow } from '../types';
 import { 
   updateCatchStatus, 
   createTournament, 
@@ -50,7 +57,15 @@ import {
   subscribeUsers, 
   updateUserStatus, 
   deleteUser, 
-  updateUser 
+  updateUser,
+  subscribeAllTournamentCodes,
+  createAssignedTournamentCode,
+  updateTournamentCodePayment,
+  deleteTournamentCode,
+  generateUniqueTournamentCode,
+  subscribeTeams,
+  updateTeamStatus,
+  deleteTeamByAdmin
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
@@ -106,7 +121,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const canManageModerators = isSuperAdmin;
 
   // Determine initial active section based on user permissions
-  const getInitialSection = (): 'moderation' | 'tournaments' | 'create_tournament' | 'fishermen' | 'antifraud' | 'moderators' => {
+  const getInitialSection = (): 'moderation' | 'tournaments' | 'create_tournament' | 'teams' | 'fishermen' | 'antifraud' | 'moderators' => {
     if (canModerate) return 'moderation';
     if (canTournaments) return 'tournaments';
     if (canFishermen) return 'fishermen';
@@ -115,7 +130,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     return 'moderation';
   };
 
-  const [activeSection, setActiveSection] = useState<'moderation' | 'tournaments' | 'create_tournament' | 'fishermen' | 'antifraud' | 'moderators'>(getInitialSection());
+  const [activeSection, setActiveSection] = useState<'moderation' | 'tournaments' | 'create_tournament' | 'teams' | 'fishermen' | 'antifraud' | 'moderators'>(getInitialSection());
   
   // Flash / Notification state
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -148,7 +163,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
   const [isDeletingTourneyId, setIsDeletingTourneyId] = useState<string | null>(null);
 
-  // Tournament creation states
+  // Teams Management & Approval State
+  const [allTeams, setAllTeams] = useState<Team[]>([]);
+  const [teamFilter, setTeamFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [searchTeam, setSearchTeam] = useState('');
+  const [rejectingTeam, setRejectingTeam] = useState<Team | null>(null);
+  const [teamRejectReason, setTeamRejectReason] = useState('');
+
+  // Tournament creation states (matching UI: criar torneio.png)
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [rulesText, setRulesText] = useState('');
@@ -158,15 +180,23 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   });
   const [endDate, setEndDate] = useState('2026-12-31');
   const [status, setStatus] = useState<Tournament['status']>('active');
-  const [targetSpeciesInput, setTargetSpeciesInput] = useState('Tucunaré, Tucunaré Azul, Tucunaré Amarelo');
+  const [targetSpeciesInput, setTargetSpeciesInput] = useState('Tucunaré');
   const [metric, setMetric] = useState<'length' | 'weight' | 'both'>('length');
   const [prize, setPrize] = useState('');
   const [prizeValue, setPrizeValue] = useState<string>('');
   const [entryFeeType, setEntryFeeType] = useState<'gratis' | 'pago'>('gratis');
   const [entryFeeAmount, setEntryFeeAmount] = useState<string>('');
   const [teamFormat, setTeamFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto'>('solo');
-  const [keyword, setKeyword] = useState('');
-  const [imageUrl, setImageUrl] = useState(IMAGE_PRESETS[0].url);
+  const [keyword, setKeyword] = useState('TORNEIO2026');
+  const [imageUrl, setImageUrl] = useState('');
+  const [daysForRegistration, setDaysForRegistration] = useState<number>(7);
+  const [maxParticipants, setMaxParticipants] = useState<number>(50);
+  const [participationCode, setParticipationCode] = useState('');
+  const [captureWindows, setCaptureWindows] = useState<CaptureWindow[]>([]);
+  const [newWindowDate, setNewWindowDate] = useState('');
+  const [newWindowSecret, setNewWindowSecret] = useState('');
+  const [newWindowStartTime, setNewWindowStartTime] = useState('');
+  const [newWindowEndTime, setNewWindowEndTime] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -188,6 +218,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   // Registered Users Management State
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
   const [searchFisherman, setSearchFisherman] = useState('');
+  const [fishermanSubTab, setFishermanSubTab] = useState<'users' | 'codes'>('users');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editFullName, setEditFullName] = useState('');
   const [editCpf, setEditCpf] = useState('');
@@ -195,6 +226,31 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editNickname, setEditNickname] = useState('');
   const [editAddress, setEditAddress] = useState('');
   const [editUserStatusVal, setEditUserStatusVal] = useState<'active' | 'blocked'>('active');
+
+  // Anti-fraud Assigned Tournament Codes State
+  const [allTournamentCodes, setAllTournamentCodes] = useState<TournamentCode[]>([]);
+  const [searchCodeQuery, setSearchCodeQuery] = useState('');
+  const [codeTourneyFilter, setCodeTourneyFilter] = useState('all');
+  const [codePaymentFilter, setCodePaymentFilter] = useState<'all' | 'paid' | 'pending' | 'free'>('all');
+  const [codeUsageFilter, setCodeUsageFilter] = useState<'all' | 'active' | 'used'>('all');
+
+  // Modal: Assign Code to User
+  const [assigningUser, setAssigningUser] = useState<UserProfile | null>(null);
+  const [assignTourneyId, setAssignTourneyId] = useState<string>('');
+  const [assignPaymentStatus, setAssignPaymentStatus] = useState<'paid' | 'pending' | 'free'>('paid');
+  const [assignPaymentAmount, setAssignPaymentAmount] = useState<string>('0');
+  const [assignPaymentNotes, setAssignPaymentNotes] = useState<string>('');
+  const [assignCustomCode, setAssignCustomCode] = useState<string>('');
+  const [isGeneratingAssignedCode, setIsGeneratingAssignedCode] = useState(false);
+  const [generatedCodeSuccess, setGeneratedCodeSuccess] = useState<{
+    code: string;
+    userName: string;
+    userCpf: string;
+    tournamentTitle: string;
+    paymentStatus: string;
+    whatsappUrl: string;
+  } | null>(null);
+  const [copiedCodeVal, setCopiedCodeVal] = useState<string | null>(null);
 
   // Anti-fraud Phase Key Management State
   const [selectedTourneyForPhase, setSelectedTourneyForPhase] = useState<string>('');
@@ -221,11 +277,118 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     return () => unsubscribe();
   }, []);
 
+  // Subscribe to all tournament codes for anti-fraud tracking
+  useEffect(() => {
+    const unsubscribe = subscribeAllTournamentCodes((codes) => {
+      setAllTournamentCodes(codes);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to all teams for admin moderation
+  useEffect(() => {
+    const unsubscribe = subscribeTeams((teams) => {
+      setAllTeams(teams);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const showFlashMessage = (text: string, type: 'success' | 'error' = 'success') => {
     setActionMessage({ text, type });
     setTimeout(() => {
       setActionMessage(null);
     }, 4500);
+  };
+
+  // Team Moderation: Approve Team
+  const handleApproveTeam = async (team: Team) => {
+    try {
+      await updateTeamStatus(team.id, 'approved', currentUser?.displayName || currentUser?.fullName || 'Administrador');
+      showFlashMessage(`✅ Equipe "${team.name}" foi APROVADA com sucesso!`, 'success');
+    } catch (e: any) {
+      showFlashMessage(`Erro ao aprovar equipe: ${e.message}`, 'error');
+    }
+  };
+
+  // Team Moderation: Open Reject Modal
+  const handleOpenRejectTeamModal = (team: Team) => {
+    setRejectingTeam(team);
+    setTeamRejectReason('Nome ou logotipo inadequado, ou dados incompletos.');
+  };
+
+  // Team Moderation: Confirm Reject
+  const handleConfirmRejectTeam = async () => {
+    if (!rejectingTeam) return;
+    try {
+      await updateTeamStatus(
+        rejectingTeam.id,
+        'rejected',
+        currentUser?.displayName || currentUser?.fullName || 'Administrador',
+        teamRejectReason || 'Reprovado pela moderação.'
+      );
+      showFlashMessage(`🛑 Equipe "${rejectingTeam.name}" foi REPROVADA.`, 'success');
+      setRejectingTeam(null);
+      setTeamRejectReason('');
+    } catch (e: any) {
+      showFlashMessage(`Erro ao reprovar equipe: ${e.message}`, 'error');
+    }
+  };
+
+  // Team Moderation: Delete Team
+  const handleDeleteTeam = (team: Team) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir Equipe',
+      message: `Tem certeza que deseja EXCLUIR DEFINITIVAMENTE a equipe "${team.name}" (${team.code})? Todos os membros serão desvinculados.`,
+      confirmLabel: 'Sim, Excluir Equipe',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteTeamByAdmin(team.id);
+          showFlashMessage(`🗑️ Equipe "${team.name}" excluída com sucesso!`, 'success');
+        } catch (e: any) {
+          showFlashMessage(`Erro ao excluir equipe: ${e.message}`, 'error');
+        }
+      }
+    });
+  };
+
+  // Generate participation code for new tournament
+  const handleGenerateParticipationCode = () => {
+    const code = generateUniqueTournamentCode('TORNEIO');
+    setParticipationCode(code);
+    showFlashMessage(`🔑 Código gerado: ${code}`, 'success');
+  };
+
+  // Add capture window
+  const handleAddCaptureWindow = () => {
+    if (!newWindowDate) {
+      showFlashMessage('Selecione uma data para a janela de captura.', 'error');
+      return;
+    }
+    if (!newWindowSecret.trim()) {
+      showFlashMessage('Digite a palavra-chave/segredo para esta janela.', 'error');
+      return;
+    }
+    const newWin: CaptureWindow = {
+      id: 'win_' + Date.now(),
+      date: newWindowDate,
+      secret: newWindowSecret.trim().toUpperCase(),
+      startTime: newWindowStartTime || '06:00',
+      endTime: newWindowEndTime || '18:00'
+    };
+    setCaptureWindows(prev => [...prev, newWin]);
+    setNewWindowDate('');
+    setNewWindowSecret('');
+    setNewWindowStartTime('');
+    setNewWindowEndTime('');
+    showFlashMessage('Janela de captura adicionada com sucesso!', 'success');
+  };
+
+  // Remove capture window
+  const handleRemoveCaptureWindow = (id: string) => {
+    setCaptureWindows(prev => prev.filter(w => w.id !== id));
   };
 
   // Moderation: Approve Catch
@@ -460,9 +623,11 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
         try {
           setIsSubmitting(true);
+          const effectiveBannerUrl = imageUrl.trim() || IMAGE_PRESETS[0].url;
+
           await createTournament({
             title: title.trim(),
-            description: description.trim(),
+            description: description.trim() || `Campeonato oficial ${title.trim()}`,
             rules: rules,
             startDate: startDate,
             endDate: endDate,
@@ -475,7 +640,11 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             entryFeeAmount: entryFeeType === 'pago' && entryFeeAmount ? Number(entryFeeAmount) : 0,
             teamFormat: teamFormat,
             keyword: keyword.trim().toUpperCase(),
-            imageUrl: imageUrl
+            imageUrl: effectiveBannerUrl,
+            daysForRegistration: Number(daysForRegistration) || 7,
+            maxParticipants: Number(maxParticipants) || 50,
+            tournamentCode: participationCode.trim() || undefined,
+            captureWindows: captureWindows.length > 0 ? captureWindows : undefined
           });
 
           setFormSuccess('Campeonato criado com sucesso no Firestore!');
@@ -487,8 +656,12 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setRulesText('');
           setPrize('');
           setPrizeValue('');
-          setKeyword('');
-          setEntryFeeAmount('');
+          setKeyword('TORNEIO2026');
+          setImageUrl('');
+          setDaysForRegistration(7);
+          setMaxParticipants(50);
+          setParticipationCode('');
+          setCaptureWindows([]);
           setActiveSection('tournaments');
         } catch (err: any) {
           setFormError('Erro ao criar campeonato: ' + err.message);
@@ -590,6 +763,127 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Anti-fraud Assigned Code: Open Modal for a specific user
+  const handleOpenAssignCode = (user: UserProfile) => {
+    setAssigningUser(user);
+    const firstTourney = tournaments[0];
+    const initialTourneyId = firstTourney ? firstTourney.id : '';
+    setAssignTourneyId(initialTourneyId);
+
+    const isPaid = firstTourney && firstTourney.entryFeeType === 'pago';
+    setAssignPaymentStatus(isPaid ? 'paid' : 'free');
+    setAssignPaymentAmount(firstTourney?.entryFeeAmount ? String(firstTourney.entryFeeAmount) : '0');
+    setAssignPaymentNotes(isPaid ? 'Pagamento confirmado pela organização' : 'Inscrição gratuita / cortesia');
+
+    // Generate suggested unique code format: TRN-[CPF_LAST_4]-[4_DIGITS]
+    const cpfDigits = user.cpf ? user.cpf.replace(/\D/g, '').slice(-4) : 'USR';
+    const suggested = generateUniqueTournamentCode(`TRN-${cpfDigits}`);
+    setAssignCustomCode(suggested);
+  };
+
+  // Anti-fraud Assigned Code: Generate & Save Code
+  const handleGenerateAssignedCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assigningUser) return;
+    if (!assignTourneyId) {
+      showFlashMessage('Por favor, selecione o campeonato.', 'error');
+      return;
+    }
+
+    const tourney = tournaments.find(t => t.id === assignTourneyId);
+    if (!tourney) {
+      showFlashMessage('Campeonato não encontrado.', 'error');
+      return;
+    }
+
+    try {
+      setIsGeneratingAssignedCode(true);
+      const codeCreated = await createAssignedTournamentCode({
+        tournamentId: tourney.id,
+        tournamentTitle: tourney.title,
+        userId: assigningUser.uid,
+        userName: assigningUser.fullName || assigningUser.displayName,
+        userEmail: assigningUser.email,
+        userCpf: assigningUser.cpf || '',
+        paymentStatus: assignPaymentStatus,
+        paymentAmount: Number(assignPaymentAmount) || 0,
+        paymentNotes: assignPaymentNotes.trim(),
+        customCode: assignCustomCode.trim() || undefined,
+        createdBy: currentUser?.displayName || currentUser?.email || 'admin'
+      });
+
+      // Prepare WhatsApp Direct Message
+      const fishermanName = assigningUser.fullName || assigningUser.displayName;
+      const statusText = assignPaymentStatus === 'paid' ? '✅ Confirmado (Pago)' : assignPaymentStatus === 'free' ? '🆓 Isento / Grátis' : '⏳ Aguardando Validação';
+      
+      const whatsappMsg = `🏆 *PESCAESPORTE - CÓDIGO DE PARTICIPAÇÃO EXCLUSIVO*\n\nOlá *${fishermanName}*!\n\nSeu código individual para o campeonato *${tourney.title}* foi gerado e atribuído ao seu cadastro com proteção antifraude:\n\n🔑 *CÓDIGO DE INSCRIÇÃO:* ${codeCreated.code}\n👤 *Pescador:* ${fishermanName}\n📄 *CPF Vinculado:* ${assigningUser.cpf || 'Cadastrado no Sistema'}\n💰 *Status do Pagamento:* ${statusText}\n\n🔒 *AVISO DE SEGURANÇA:* Este código é de uso único e intransferível, vinculado exclusivamente à sua conta no aplicativo. Outros usuários não conseguirão utilizá-lo.\n\nAcesse o PescaEsporte e utilize o código para confirmar sua participação!`;
+      
+      const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(whatsappMsg)}`;
+
+      setGeneratedCodeSuccess({
+        code: codeCreated.code,
+        userName: fishermanName,
+        userCpf: assigningUser.cpf || '',
+        tournamentTitle: tourney.title,
+        paymentStatus: statusText,
+        whatsappUrl
+      });
+
+      showFlashMessage(`🔑 Código ${codeCreated.code} gerado e vinculado a ${fishermanName} com sucesso!`, 'success');
+      setAssigningUser(null);
+    } catch (err: any) {
+      console.error("Erro ao gerar código atribuído:", err);
+      showFlashMessage('Erro ao gerar código: ' + (err.message || 'Erro desconhecido'), 'error');
+    } finally {
+      setIsGeneratingAssignedCode(false);
+    }
+  };
+
+  // Anti-fraud Assigned Code: Toggle Payment Status
+  const handleToggleCodePayment = async (codeItem: TournamentCode) => {
+    const nextStatus: 'paid' | 'pending' = codeItem.paymentStatus === 'paid' ? 'pending' : 'paid';
+    try {
+      await updateTournamentCodePayment(
+        codeItem.id, 
+        nextStatus, 
+        nextStatus === 'paid' ? 'Pagamento validado pela organização' : 'Pagamento pendente de conferência'
+      );
+      showFlashMessage(
+        nextStatus === 'paid' 
+          ? `✅ Pagamento do código ${codeItem.code} confirmado!` 
+          : `⚠️ Pagamento do código ${codeItem.code} alterado para Pendente.`,
+        'success'
+      );
+    } catch (e: any) {
+      showFlashMessage('Erro ao atualizar pagamento: ' + e.message, 'error');
+    }
+  };
+
+  // Anti-fraud Assigned Code: Delete Code
+  const handleDeleteCode = (codeItem: TournamentCode) => {
+    if (codeItem.isUsed) {
+      showFlashMessage('Não é possível excluir um código que já foi utilizado e consumido.', 'error');
+      return;
+    }
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir Código de Inscrição',
+      message: `Tem certeza que deseja excluir o código "${codeItem.code}" emitido para "${codeItem.assignedToUserName || 'Pescador'}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Sim, Excluir Código',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteTournamentCode(codeItem.id);
+          showFlashMessage(`🗑️ Código ${codeItem.code} excluído com sucesso.`, 'success');
+        } catch (e: any) {
+          showFlashMessage('Erro ao excluir código: ' + e.message, 'error');
+        }
+      }
+    });
   };
 
   // Anti-fraud: Update Keyword for Tournament Phase
@@ -769,17 +1063,38 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           )}
 
           {canFishermen && (
-            <button
-              onClick={() => setActiveSection('fishermen')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
-                activeSection === 'fishermen'
-                  ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
-                  : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-              }`}
-            >
-              <Users className="h-4 w-4" />
-              <span>Pescadores ({allFishermenList.length})</span>
-            </button>
+            <>
+              <button
+                onClick={() => setActiveSection('teams')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                  activeSection === 'teams'
+                    ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
+                    : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <Users className="h-4 w-4" />
+                <span>
+                  Equipes ({allTeams.length})
+                  {allTeams.filter(t => t.status === 'pending' || !t.status).length > 0 && (
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-400 text-slate-950 text-[10px] rounded-full font-black">
+                      {allTeams.filter(t => t.status === 'pending' || !t.status).length} pendente(s)
+                    </span>
+                  )}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveSection('fishermen')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                  activeSection === 'fishermen'
+                    ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
+                    : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <UserCheck className="h-4 w-4" />
+                <span>Pescadores ({allFishermenList.length})</span>
+              </button>
+            </>
           )}
 
           {canAntifraud && (
@@ -1203,313 +1518,108 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
         </div>
       )}
 
-      {/* SECTION 3: CREATE TOURNAMENT FORM */}
+      {/* SECTION 3: CREATE TOURNAMENT FORM (MATCHING criar torneio.png) */}
       {activeSection === 'create_tournament' && canTournaments && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl max-w-4xl mx-auto space-y-6 animate-fade-in">
-          <div className="flex items-center space-x-3 pb-4 border-b border-slate-800">
-            <div className="p-2.5 bg-amber-500/10 rounded-2xl text-amber-400">
-              <Award className="h-6 w-6" />
+        <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+          {/* Header Title Badge matching criar torneio.png */}
+          <div className="flex items-center justify-between">
+            <div className="inline-block bg-[#00e676] text-black font-black text-xs sm:text-sm px-4 py-2 uppercase tracking-wider rounded-md shadow-md">
+              CRIAR NOVO TORNEIO
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-white">Cadastrar Novo Campeonato</h3>
-              <p className="text-slate-400 text-xs">Crie novas arenas nacionais integradas com validadores antifraude.</p>
-            </div>
+            <span className="text-xs font-mono text-slate-400">
+              Configurações Oficiais & Painel Antifraude
+            </span>
           </div>
 
-          <form onSubmit={handleCreateTournamentClick} className="space-y-6">
+          <form onSubmit={handleCreateTournamentClick} className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl">
             {formError && (
-              <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs flex items-center gap-2.5">
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl text-xs flex items-center gap-2.5">
                 <AlertTriangle className="h-4.5 w-4.5 shrink-0" />
                 <span>{formError}</span>
               </div>
             )}
 
             {formSuccess && (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2.5">
+              <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl text-xs flex items-center gap-2.5">
                 <CheckCircle2 className="h-4.5 w-4.5 shrink-0" />
                 <span>{formSuccess}</span>
               </div>
             )}
 
-            {/* Basic Info */}
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">
-                  Nome do Torneio *
-                </label>
+            {/* Row 1: Title & Team Format Dropdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
                 <input
                   type="text"
-                  placeholder="Ex: II Torneio Nacional do Tucunaré Azul"
+                  placeholder="Título do Torneio"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm"
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">
-                  Descrição do Campeonato *
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Descreva o propósito, as bacias hidrográficas válidas e regras gerais..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm"
-                />
-              </div>
-            </div>
-
-            {/* Status Selection Flag */}
-            <div className="p-4 sm:p-5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-              <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5">
-                <Tag className="h-3.5 w-3.5 text-amber-400" />
-                <span>Status Inicial do Torneio</span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setStatus('upcoming')}
-                  className={`p-3 rounded-xl border text-xs font-bold text-left transition cursor-pointer flex items-center justify-between ${
-                    status === 'upcoming'
-                      ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>⏳ Em Breve (Futuro)</span>
-                  {status === 'upcoming' && <Check className="h-4 w-4 text-sky-400" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatus('active')}
-                  className={`p-3 rounded-xl border text-xs font-bold text-left transition cursor-pointer flex items-center justify-between ${
-                    status === 'active'
-                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>🟢 Ativo (Em Andamento)</span>
-                  {status === 'active' && <Check className="h-4 w-4 text-emerald-400" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatus('completed')}
-                  className={`p-3 rounded-xl border text-xs font-bold text-left transition cursor-pointer flex items-center justify-between ${
-                    status === 'completed'
-                      ? 'bg-slate-700/40 border-slate-600 text-slate-200'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>🏁 Encerrado (Histórico)</span>
-                  {status === 'completed' && <Check className="h-4 w-4 text-slate-300" />}
-                </button>
-              </div>
-            </div>
-
-            {/* SETTINGS: Format, Fee, and Prize */}
-            <div className="p-4 sm:p-5 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
-              <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest block font-bold">
-                Configurações do Torneio (Formato, Valor Inscrição e Prêmios)
-              </span>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5">
-                    <Users className="h-3.5 w-3.5 text-sky-400" />
-                    <span>Formato de Pescadores</span>
-                  </label>
-                  <select
-                    value={teamFormat}
-                    onChange={(e: any) => setTeamFormat(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 text-xs cursor-pointer"
-                  >
-                    <option value="solo">Solo (1 competidor)</option>
-                    <option value="dupla">Dupla (Até 2 competidores)</option>
-                    <option value="trio">Trio (Equipe de 3 competidores)</option>
-                    <option value="quarteto">Quarteto (Equipe de 4 competidores)</option>
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5">
-                    <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Tipo de Inscrição</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEntryFeeType('gratis');
-                        setEntryFeeAmount('');
-                      }}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold text-center transition cursor-pointer ${
-                        entryFeeType === 'gratis'
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : 'text-slate-400 hover:text-slate-300'
-                      }`}
-                    >
-                      Grátis
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEntryFeeType('pago')}
-                      className={`py-1.5 rounded-lg text-[11px] font-bold text-center transition cursor-pointer ${
-                        entryFeeType === 'pago'
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          : 'text-slate-400 hover:text-slate-300'
-                      }`}
-                    >
-                      Pago
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className={`text-[11px] font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5 ${entryFeeType === 'pago' ? 'opacity-100' : 'opacity-40'}`}>
-                    <DollarSign className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Valor da Inscrição (R$)</span>
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Ex: 150"
-                    disabled={entryFeeType === 'gratis'}
-                    value={entryFeeAmount}
-                    onChange={(e) => setEntryFeeAmount(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 text-xs disabled:opacity-30 disabled:cursor-not-allowed font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* VALUE & DESCRIPTION OF THE PRIZE */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-slate-900 pt-3.5">
-                <div className="space-y-2 sm:col-span-1">
-                  <label className="text-[11px] font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5">
-                    <Trophy className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Valor em Prêmios (R$)</span>
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Ex: 25000"
-                    value={prizeValue}
-                    onChange={(e) => setPrizeValue(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 text-xs font-mono"
-                  />
-                </div>
-
-                <div className="space-y-2 sm:col-span-2">
-                  <label className="text-[11px] font-semibold text-slate-300 font-mono uppercase tracking-wider block flex items-center gap-1.5">
-                    <Award className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Descrição Completa da Premiação</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: 1º: Barco Alumínio 6m + Motor 15HP, 2º: Motor Elétrico, 3º: Kit Carretilha"
-                    value={prize}
-                    onChange={(e) => setPrize(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-amber-500 text-xs"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ANTI-FRAUD PALAVRA CHAVE */}
-            <div className="p-4 sm:p-5 bg-amber-500/5 rounded-2xl border border-amber-500/20 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-              <div className="md:col-span-8 space-y-1">
-                <div className="flex items-center space-x-2 text-amber-400">
-                  <Key className="h-4.5 w-4.5 stroke-[2.2]" />
-                  <span className="text-xs font-bold uppercase tracking-wider font-mono">Palavra-Chave de Segurança Antifraude</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Para evitar fotos antigas ou adulteradas, crie um **Código ou Palavra-Chave específico**. O competidor deverá fotografar o peixe com uma plaquinha contendo este código legível.
-                </p>
-              </div>
-
-              <div className="md:col-span-4 space-y-1.5">
-                <label className="text-[10px] font-semibold text-slate-400 font-mono uppercase block">Palavra-Chave Ativa</label>
-                <input
-                  type="text"
-                  placeholder="Ex: TUCUNA2026"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  className="w-full bg-slate-950 border border-amber-500/30 text-amber-400 rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-amber-400 text-xs sm:text-sm text-center uppercase font-mono font-extrabold tracking-wider"
-                />
-              </div>
-            </div>
-
-            {/* Metrics & Dates */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">Métrica de Pontuação</label>
+              <div>
                 <select
-                  value={metric}
-                  onChange={(e: any) => setMetric(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm cursor-pointer"
+                  value={teamFormat}
+                  onChange={(e: any) => setTeamFormat(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition cursor-pointer"
                 >
-                  <option value="length">Comprimento (cm)</option>
-                  <option value="weight">Peso (kg)</option>
-                  <option value="both">Comprimento e Peso combinados</option>
+                  <option value="solo">Solo (1 Pessoa)</option>
+                  <option value="dupla">Dupla (2 Pessoas)</option>
+                  <option value="trio">Trio (3 Pessoas)</option>
+                  <option value="quarteto">Equipe (4 Pessoas)</option>
                 </select>
               </div>
+            </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">Data de Início</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3.5 top-3 text-slate-500 h-4 w-4" />
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm font-mono"
-                  />
-                </div>
+            {/* Row 2: Prize & Image URL */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <input
+                  type="text"
+                  placeholder="Prêmio"
+                  value={prize}
+                  onChange={(e) => setPrize(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+                />
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">Data de Término</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3.5 top-3 text-slate-500 h-4 w-4" />
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-10 pr-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm font-mono"
-                  />
-                </div>
+              <div>
+                <input
+                  type="text"
+                  placeholder="URL da Imagem"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 font-mono"
+                />
               </div>
             </div>
 
-            {/* Species Target */}
+            {/* Banner Presets / Live Preview */}
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">
-                Espécies Alvo (separadas por vírgula)
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: Tucunaré Azul, Tucunaré Amarelo, Tucunaré Paca"
-                value={targetSpeciesInput}
-                onChange={(e) => setTargetSpeciesInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500 text-xs sm:text-sm font-mono"
-              />
-            </div>
-
-            {/* Cover Image Presets */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">
-                Foto de Capa do Campeonato
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                <span>Sugestões de Imagens de Capa (ou insira a URL acima):</span>
+                {imageUrl && (
+                  <button 
+                    type="button" 
+                    onClick={() => setImageUrl('')}
+                    className="text-xs text-rose-400 hover:underline cursor-pointer"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {IMAGE_PRESETS.map((p, idx) => (
                   <div
                     key={idx}
                     onClick={() => setImageUrl(p.url)}
                     className={`relative rounded-xl overflow-hidden cursor-pointer border-2 transition ${
-                      imageUrl === p.url ? 'border-amber-500 scale-[1.02]' : 'border-slate-800 opacity-60 hover:opacity-100'
+                      imageUrl === p.url ? 'border-[#00e676] scale-[1.02]' : 'border-slate-800 opacity-60 hover:opacity-100'
                     }`}
                   >
-                    <img src={p.url} alt={p.name} referrerPolicy="no-referrer" className="h-20 w-full object-cover" />
-                    <div className="absolute inset-0 bg-slate-950/40 p-1 flex items-end">
+                    <img src={p.url} alt={p.name} referrerPolicy="no-referrer" className="h-16 w-full object-cover" />
+                    <div className="absolute inset-0 bg-slate-950/60 p-1 flex items-end">
                       <span className="text-[10px] font-bold text-white truncate">{p.name}</span>
                     </div>
                   </div>
@@ -1517,154 +1627,901 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
             </div>
 
-            {/* Submit Button */}
-            <div className="pt-4 border-t border-slate-800 flex justify-end">
+            {/* Row 3: DIAS DE INSCRIÇÃO & LIMITE DE PARTICIPANTES */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  DIAS DE INSCRIÇÃO
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={daysForRegistration}
+                  onChange={(e) => setDaysForRegistration(Number(e.target.value))}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  LIMITE DE PARTICIPANTES
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="5000"
+                  value={maxParticipants}
+                  onChange={(e) => setMaxParticipants(Number(e.target.value))}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
+                />
+              </div>
+            </div>
+
+            {/* Row 4: Código de Participação (Opcional) + GERAR button */}
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  placeholder="Código de Participação (Opcional)"
+                  value={participationCode}
+                  onChange={(e) => setParticipationCode(e.target.value.toUpperCase())}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm font-mono uppercase focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerateParticipationCode}
+                className="bg-[#202327] hover:bg-[#2b2f35] text-white font-bold px-6 py-3.5 rounded-2xl text-xs uppercase tracking-wider transition cursor-pointer border border-slate-700/60 shrink-0"
+              >
+                GERAR
+              </button>
+            </div>
+
+            {/* Row 5: JANELAS DE CAPTURA VÁLIDAS Box */}
+            <div className="bg-[#181a1f] border border-slate-800/80 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold uppercase text-slate-300">
+                  JANELAS DE CAPTURA VÁLIDAS
+                </span>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {captureWindows.length} {captureWindows.length === 1 ? 'janela configurada' : 'janelas configuradas'}
+                </span>
+              </div>
+
+              {/* Add Window Inputs Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-center">
+                <input
+                  type="date"
+                  placeholder="dd/mm/aaaa"
+                  value={newWindowDate}
+                  onChange={(e) => setNewWindowDate(e.target.value)}
+                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                />
+
+                <input
+                  type="text"
+                  placeholder="Segredo / Palavra"
+                  value={newWindowSecret}
+                  onChange={(e) => setNewWindowSecret(e.target.value.toUpperCase())}
+                  className="bg-[#121316] border border-slate-800 text-amber-400 font-mono font-bold rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-[#00e676] uppercase placeholder-slate-500"
+                />
+
+                <input
+                  type="time"
+                  placeholder="--:--"
+                  value={newWindowStartTime}
+                  onChange={(e) => setNewWindowStartTime(e.target.value)}
+                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                />
+
+                <input
+                  type="time"
+                  placeholder="--:--"
+                  value={newWindowEndTime}
+                  onChange={(e) => setNewWindowEndTime(e.target.value)}
+                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                />
+
+                <button
+                  type="button"
+                  onClick={handleAddCaptureWindow}
+                  className="bg-[#2a2d34] hover:bg-[#343842] text-slate-200 font-bold px-3 py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer whitespace-nowrap border border-slate-700/50"
+                >
+                  ADICIONAR JANELA
+                </button>
+              </div>
+
+              {/* List of Added Windows */}
+              {captureWindows.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-slate-800">
+                  {captureWindows.map((win, idx) => (
+                    <div key={win.id || idx} className="flex items-center justify-between bg-[#121316] p-3 rounded-xl border border-slate-800 text-xs font-mono">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="text-slate-400">📅 {win.date}</span>
+                        <span className="text-sky-400">⏰ {win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
+                        <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded font-bold">
+                          🔑 {win.secret}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCaptureWindow(win.id)}
+                        className="text-rose-400 hover:text-rose-300 transition p-1 cursor-pointer"
+                        title="Remover janela"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Row 6: Descrição */}
+            <div>
+              <textarea
+                rows={3}
+                placeholder="Descrição"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm min-h-[90px] focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+              />
+            </div>
+
+            {/* Submit Button matching criar torneio.png */}
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-8 py-3.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-extrabold text-sm rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer flex items-center gap-2"
+                className="w-full bg-[#00e676] hover:bg-[#00c853] text-black font-black py-4 rounded-2xl text-sm sm:text-base uppercase tracking-wider shadow-xl transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
               >
-                {isSubmitting ? (
-                  <span>Salvando no Firestore...</span>
-                ) : (
-                  <>
-                    <PlusCircle className="h-5 w-5" />
-                    <span>Publicar Campeonato Oficial</span>
-                  </>
-                )}
+                {isSubmitting ? 'PUBLICANDO NO BANCO DE DADOS...' : 'PUBLICAR TORNEIO'}
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* SECTION 4: CADASTROS & PESCADORES REGISTRADOS */}
-      {activeSection === 'fishermen' && canFishermen && (
+      {/* SECTION: GESTÃO & APROVAÇÃO DE EQUIPES */}
+      {activeSection === 'teams' && canFishermen && (
         <div className="space-y-6 animate-fade-in">
+          {/* Header & Stats */}
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-2">
             <div>
-              <h3 className="text-xl font-bold text-white">Cadastros & Pescadores Esportivos ({allFishermenList.length})</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Gerenciamento completo: ative, bloqueie, edite ou exclua perfis cadastrados no sistema.</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold text-white">Central de Aprovação de Equipes</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                  Moderação Obrigatória
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Avalie, aprove ou reprove equipes criadas pelos pescadores. Somente equipes aprovadas com todas as vagas preenchidas podem participar de torneios em equipe.
+              </p>
             </div>
 
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-slate-500" />
-              <input
-                type="text"
-                placeholder="Buscar por Nome, CPF, E-mail ou Apelido..."
-                value={searchFisherman}
-                onChange={(e) => setSearchFisherman(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
+            {/* Sub-tab filter switcher */}
+            <div className="flex flex-wrap bg-slate-900 p-1 rounded-2xl border border-slate-800 shrink-0">
+              <button
+                onClick={() => setTeamFilter('pending')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  teamFilter === 'pending'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span>Pendentes ({allTeams.filter(t => t.status === 'pending' || !t.status).length})</span>
+              </button>
+
+              <button
+                onClick={() => setTeamFilter('approved')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  teamFilter === 'approved'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Aprovadas ({allTeams.filter(t => t.status === 'approved').length})</span>
+              </button>
+
+              <button
+                onClick={() => setTeamFilter('rejected')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  teamFilter === 'rejected'
+                    ? 'bg-rose-500 text-white shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                <span>Reprovadas ({allTeams.filter(t => t.status === 'rejected').length})</span>
+              </button>
+
+              <button
+                onClick={() => setTeamFilter('all')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  teamFilter === 'all'
+                    ? 'bg-slate-800 text-white shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>Todas ({allTeams.length})</span>
+              </button>
             </div>
           </div>
 
-          {allFishermenList.length === 0 ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
-              Nenhum competidor ou cadastro encontrado.
-            </div>
-          ) : (
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
-                      <th className="py-4 px-6">Pescador / Apelido</th>
-                      <th className="py-4 px-4">CPF</th>
-                      <th className="py-4 px-4">E-mail</th>
-                      <th className="py-4 px-4">Endereço</th>
-                      <th className="py-4 px-4">Status</th>
-                      <th className="py-4 px-6 text-right">Ações de Controle</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allFishermenList.map((f) => (
-                      <tr key={f.uid} className="border-b border-slate-800/80 text-slate-300 hover:bg-slate-800/30 transition">
-                        {/* Name & Nickname */}
-                        <td className="py-3.5 px-6 font-bold text-white">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-8 w-8 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-xs shrink-0">
-                              {f.displayName.charAt(0).toUpperCase()}
+          {/* Search bar */}
+          <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center gap-3">
+            <Search className="h-4 w-4 text-slate-500 shrink-0" />
+            <input
+              type="text"
+              placeholder="Buscar equipe por nome, código (ex: EQP-...) ou capitão..."
+              value={searchTeam}
+              onChange={(e) => setSearchTeam(e.target.value)}
+              className="bg-transparent text-slate-200 text-xs sm:text-sm focus:outline-none w-full placeholder-slate-500"
+            />
+          </div>
+
+          {/* Teams List Grid */}
+          {(() => {
+            const filteredTeams = allTeams.filter(team => {
+              // Status filter
+              if (teamFilter === 'pending' && team.status !== 'pending' && team.status !== undefined) return false;
+              if (teamFilter === 'approved' && team.status !== 'approved') return false;
+              if (teamFilter === 'rejected' && team.status !== 'rejected') return false;
+              
+              // Text query filter
+              if (searchTeam) {
+                const q = searchTeam.toLowerCase();
+                const matchName = team.name.toLowerCase().includes(q);
+                const matchCode = team.code.toLowerCase().includes(q);
+                const matchCaptain = team.creatorName?.toLowerCase().includes(q) || team.creatorEmail?.toLowerCase().includes(q);
+                if (!matchName && !matchCode && !matchCaptain) return false;
+              }
+              return true;
+            });
+
+            if (filteredTeams.length === 0) {
+              return (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
+                  <div className="h-12 w-12 rounded-full bg-slate-800 text-slate-500 flex items-center justify-center mx-auto">
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <h4 className="text-white font-bold">Nenhuma equipe encontrada</h4>
+                  <p className="text-slate-400 text-xs max-w-sm mx-auto">
+                    {teamFilter === 'pending'
+                      ? 'Não existem equipes aguardando homologação no momento.'
+                      : 'Nenhuma equipe corresponde aos filtros selecionados.'}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredTeams.map((team) => {
+                  const isPending = team.status === 'pending' || !team.status;
+                  const isApproved = team.status === 'approved';
+                  const isRejected = team.status === 'rejected';
+                  const isFull = (team.members?.length || 0) >= (team.maxMembers || 2);
+
+                  return (
+                    <div
+                      key={team.id}
+                      className="bg-[#121316] border border-slate-800 hover:border-slate-700/80 rounded-3xl p-5 sm:p-6 space-y-5 shadow-xl transition relative overflow-hidden"
+                    >
+                      {/* Top Team Header */}
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center space-x-3.5">
+                          <div className="h-12 w-12 rounded-2xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center font-bold text-white shrink-0">
+                            {team.logoUrl ? (
+                              <img
+                                src={team.logoUrl}
+                                alt={team.name}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-lg">👥</span>
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-extrabold text-white text-base leading-tight">
+                                {team.name}
+                              </h4>
                             </div>
-                            <div>
-                              <span className="block">{f.fullName || f.displayName}</span>
-                              {f.nickname && (
-                                <span className="text-[10px] text-sky-400 font-mono font-normal">
-                                  Apelido: @{f.nickname}
-                                </span>
-                              )}
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[11px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                                {team.code}
+                              </span>
+                              <span className="text-[11px] font-mono text-slate-400">
+                                Capitão: {team.creatorName || team.creatorEmail}
+                              </span>
                             </div>
                           </div>
-                        </td>
+                        </div>
 
-                        {/* CPF */}
-                        <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
-                          {f.cpf ? f.cpf : <span className="text-slate-600 italic">Não informado</span>}
-                        </td>
-
-                        {/* Email */}
-                        <td className="py-3.5 px-4 font-mono text-slate-300 text-[11px]">
-                          {f.email}
-                        </td>
-
-                        {/* Address */}
-                        <td className="py-3.5 px-4 text-slate-400 text-[11px]">
-                          {f.address ? f.address : <span className="text-slate-600 italic">Não informado</span>}
-                        </td>
-
-                        {/* Status */}
-                        <td className="py-3.5 px-4">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase ${
-                            f.status === 'blocked'
-                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          }`}>
-                            {f.status === 'blocked' ? 'Bloqueado' : 'Ativo'}
-                          </span>
-                        </td>
-
-                        {/* Actions */}
-                        <td className="py-3.5 px-6 text-right">
-                          {f.uid === 'admin_master_root' ? (
-                            <span className="text-[10px] text-amber-400 font-mono font-bold">👑 Mestre Protegido</span>
-                          ) : (
-                            <div className="flex items-center justify-end space-x-2">
-                              <button
-                                onClick={() => handleOpenEditUser(f)}
-                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                                title="Editar Cadastro Completo"
-                              >
-                                <Edit3 className="h-3 w-3 text-sky-400" />
-                                <span>Editar</span>
-                              </button>
-
-                              <button
-                                onClick={() => handleToggleUserStatus(f)}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                                  f.status === 'blocked'
-                                    ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400'
-                                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400'
-                                }`}
-                                title={f.status === 'blocked' ? 'Desbloquear / Reativar Pescador' : 'Bloquear Pescador'}
-                              >
-                                {f.status === 'blocked' ? 'Ativar' : 'Bloquear'}
-                              </button>
-
-                              <button
-                                onClick={() => handleDeleteUser(f)}
-                                className="p-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer"
-                                title="Excluir Cadastro Permanentemente"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
+                        {/* Status Badge */}
+                        <div>
+                          {isPending && (
+                            <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-amber-500/15 border border-amber-500/30 text-amber-400 inline-flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              <span>Pendente</span>
+                            </span>
                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                          {isApproved && (
+                            <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 inline-flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>Aprovada</span>
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-rose-500/15 border border-rose-500/30 text-rose-400 inline-flex items-center gap-1">
+                              <XCircle className="h-3 w-3" />
+                              <span>Reprovada</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Vacancy / Members Stats */}
+                      <div className="p-3.5 bg-[#181a1f] rounded-2xl border border-slate-800 space-y-2">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-400 font-medium">Vagas preenchidas:</span>
+                          <span className={`font-mono font-bold ${isFull ? 'text-[#00e676]' : 'text-amber-400'}`}>
+                            {team.members?.length || 0} / {team.maxMembers || 2} {isFull ? '(Equipe Completa)' : '(Vagas Abertas)'}
+                          </span>
+                        </div>
+
+                        {/* Members list preview */}
+                        <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                          {team.members && team.members.length > 0 ? (
+                            team.members.map((m, mIdx) => (
+                              <div key={m.userId || mIdx} className="flex items-center justify-between text-xs text-slate-300">
+                                <div className="flex items-center gap-2 truncate">
+                                  <div className="h-5 w-5 rounded-full bg-slate-800 flex items-center justify-center text-[10px] text-white shrink-0">
+                                    {m.photoUrl ? (
+                                      <img src={m.photoUrl} alt="" className="w-full h-full rounded-full object-cover" />
+                                    ) : (
+                                      m.name?.charAt(0) || 'P'
+                                    )}
+                                  </div>
+                                  <span className="truncate">{m.name}</span>
+                                  {m.userId === team.creatorId && (
+                                    <span className="text-[9px] font-mono uppercase bg-amber-500/20 text-amber-300 px-1 rounded">
+                                      Capitão
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-mono text-slate-500 truncate ml-2">
+                                  {m.email}
+                                </span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-[11px] text-slate-500 italic">Sem membros registrados.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Rejection Note if rejected */}
+                      {isRejected && team.rejectionReason && (
+                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 space-y-1">
+                          <span className="font-bold block">Motivo da Reprovação:</span>
+                          <p>{team.rejectionReason}</p>
+                        </div>
+                      )}
+
+                      {/* Approval metadata */}
+                      {isApproved && team.reviewedBy && (
+                        <p className="text-[10px] font-mono text-slate-500">
+                          Homologada por: <strong className="text-slate-400">{team.reviewedBy}</strong>
+                        </p>
+                      )}
+
+                      {/* Admin Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                        <div className="flex items-center gap-2">
+                          {isPending && (
+                            <>
+                              <button
+                                onClick={() => handleApproveTeam(team)}
+                                className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span>Aprovar Equipe</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleOpenRejectTeamModal(team)}
+                                className="px-3.5 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <XCircle className="h-3.5 w-3.5" />
+                                <span>Reprovar</span>
+                              </button>
+                            </>
+                          )}
+
+                          {isApproved && (
+                            <button
+                              onClick={() => handleOpenRejectTeamModal(team)}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 font-semibold text-xs rounded-xl transition cursor-pointer"
+                            >
+                              Revogar / Reprovar
+                            </button>
+                          )}
+
+                          {isRejected && (
+                            <button
+                              onClick={() => handleApproveTeam(team)}
+                              className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 font-semibold text-xs rounded-xl transition cursor-pointer"
+                            >
+                              Reavaliar e Aprovar
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Delete Team Button */}
+                        <button
+                          onClick={() => handleDeleteTeam(team)}
+                          className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                          title="Excluir Equipe Permanentemente"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* SECTION 4: CADASTROS & PESCADORES REGISTRADOS + CÓDIGOS ANTIFRAUDE */}
+      {activeSection === 'fishermen' && canFishermen && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header & Sub-tab Switcher */}
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 pb-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold text-white">Cadastros & Códigos de Inscrição Antifraude</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                  Proteção Individual
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Gerencie pescadores cadastrados e emita códigos de participação individuais vinculados ao CPF para evitar uso indevido por terceiros.
+              </p>
+            </div>
+
+            {/* Sub-tab buttons */}
+            <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-800 shrink-0">
+              <button
+                onClick={() => setFishermanSubTab('users')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  fishermanSubTab === 'users'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Users className="h-4 w-4" />
+                <span>Pescadores ({allFishermenList.length})</span>
+              </button>
+              <button
+                onClick={() => setFishermanSubTab('codes')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  fishermanSubTab === 'codes'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Ticket className="h-4 w-4" />
+                <span>Códigos Emitidos ({allTournamentCodes.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SUBTAB 1: PESCADORES CADASTRADOS & GERAR CÓDIGO */}
+          {fishermanSubTab === 'users' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
+                <div className="relative w-full sm:w-80">
+                  <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por Nome, CPF, E-mail ou Apelido..."
+                    value={searchFisherman}
+                    onChange={(e) => setSearchFisherman(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="text-xs text-slate-400 font-mono">
+                  💡 Clique no botão <strong className="text-amber-400">"🔑 Gerar Código"</strong> para emitir uma credencial de acesso vinculada exclusivamente ao competidor.
+                </div>
+              </div>
+
+              {allFishermenList.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
+                  Nenhum competidor ou cadastro encontrado.
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
+                          <th className="py-4 px-6">Pescador / Apelido</th>
+                          <th className="py-4 px-4">CPF (Vinculado)</th>
+                          <th className="py-4 px-4">E-mail</th>
+                          <th className="py-4 px-4">Inscrições & Códigos</th>
+                          <th className="py-4 px-4">Status</th>
+                          <th className="py-4 px-6 text-right">Gerar Código & Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allFishermenList.map((f) => {
+                          const userCodes = allTournamentCodes.filter(c => 
+                            c.assignedToUserId === f.uid || 
+                            (c.assignedToUserEmail && c.assignedToUserEmail.toLowerCase() === f.email?.toLowerCase())
+                          );
+                          const paidCodesCount = userCodes.filter(c => c.paymentStatus === 'paid').length;
+
+                          return (
+                            <tr key={f.uid} className="border-b border-slate-800/80 text-slate-300 hover:bg-slate-800/30 transition">
+                              {/* Name & Nickname */}
+                              <td className="py-3.5 px-6 font-bold text-white">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="h-9 w-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-xs shrink-0 border border-sky-500/30">
+                                    {f.displayName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <span className="block text-slate-100">{f.fullName || f.displayName}</span>
+                                    {f.nickname && (
+                                      <span className="text-[10px] text-amber-400 font-mono font-normal block">
+                                        @{f.nickname}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* CPF */}
+                              <td className="py-3.5 px-4 font-mono text-slate-300 text-[11px]">
+                                {f.cpf ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-slate-200">
+                                    <CreditCard className="h-3 w-3 text-slate-400" />
+                                    {f.cpf}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-600 italic">Não informado</span>
+                                )}
+                              </td>
+
+                              {/* Email */}
+                              <td className="py-3.5 px-4 font-mono text-slate-400 text-[11px]">
+                                {f.email}
+                              </td>
+
+                              {/* Assigned Codes summary */}
+                              <td className="py-3.5 px-4">
+                                {userCodes.length > 0 ? (
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold inline-block w-fit">
+                                      🎟️ {userCodes.length} código(s) emitido(s)
+                                    </span>
+                                    {paidCodesCount > 0 && (
+                                      <span className="text-[9px] font-mono text-emerald-400">
+                                        ✓ {paidCodesCount} com pagamento confirmado
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 italic">Sem códigos emitidos</span>
+                                )}
+                              </td>
+
+                              {/* Status */}
+                              <td className="py-3.5 px-4">
+                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase ${
+                                  f.status === 'blocked'
+                                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                }`}>
+                                  {f.status === 'blocked' ? 'Bloqueado' : 'Ativo'}
+                                </span>
+                              </td>
+
+                              {/* Actions & Code Generation */}
+                              <td className="py-3.5 px-6 text-right">
+                                {f.uid === 'admin_master_root' ? (
+                                  <span className="text-[10px] text-amber-400 font-mono font-bold">👑 Mestre Protegido</span>
+                                ) : (
+                                  <div className="flex items-center justify-end space-x-2">
+                                    {/* Primary Button: Gerar Código Antifraude */}
+                                    <button
+                                      onClick={() => handleOpenAssignCode(f)}
+                                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-950/40"
+                                      title="Gerar código de participação vinculado exclusivamente a este usuário"
+                                    >
+                                      <Key className="h-3.5 w-3.5" />
+                                      <span>Gerar Código</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleOpenEditUser(f)}
+                                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                                      title="Editar Cadastro Completo"
+                                    >
+                                      <Edit3 className="h-3 w-3 text-sky-400" />
+                                      <span>Editar</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleToggleUserStatus(f)}
+                                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                                        f.status === 'blocked'
+                                          ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400'
+                                          : 'bg-slate-800 hover:bg-slate-700 text-slate-400'
+                                      }`}
+                                      title={f.status === 'blocked' ? 'Desbloquear / Reativar Pescador' : 'Bloquear Pescador'}
+                                    >
+                                      {f.status === 'blocked' ? 'Ativar' : 'Bloquear'}
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleDeleteUser(f)}
+                                      className="p-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer"
+                                      title="Excluir Cadastro Permanentemente"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBTAB 2: CÓDIGOS ATRIBUÍDOS & CONTROLE DE PAGAMENTOS ANTIFRAUDE */}
+          {fishermanSubTab === 'codes' && (
+            <div className="space-y-4">
+              {/* Filters for codes */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row gap-3 items-center justify-between">
+                <div className="relative w-full md:w-72">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por código, pescador, CPF..."
+                    value={searchCodeQuery}
+                    onChange={(e) => setSearchCodeQuery(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2 w-full md:w-auto items-center justify-end">
+                  {/* Tournament Filter */}
+                  <select
+                    value={codeTourneyFilter}
+                    onChange={(e) => setCodeTourneyFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">Todos os Campeonatos</option>
+                    {tournaments.map(t => (
+                      <option key={t.id} value={t.id}>{t.title}</option>
+                    ))}
+                  </select>
+
+                  {/* Payment Filter */}
+                  <select
+                    value={codePaymentFilter}
+                    onChange={(e: any) => setCodePaymentFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">Status Pagamento: Todos</option>
+                    <option value="paid">🟢 Confirmados / Pagos</option>
+                    <option value="pending">🟡 Pendentes</option>
+                    <option value="free">🆓 Grátis / Isentos</option>
+                  </select>
+
+                  {/* Usage Filter */}
+                  <select
+                    value={codeUsageFilter}
+                    onChange={(e: any) => setCodeUsageFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 text-slate-300 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="all">Uso: Todos</option>
+                    <option value="active">🟢 Ativos (Disponíveis)</option>
+                    <option value="used">🔒 Já Consumidos / Utilizados</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Codes Table */}
+              {allTournamentCodes.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
+                  Nenhum código de inscrição gerado até o momento. Volte para a aba "Pescadores" e clique em "Gerar Código".
+                </div>
+              ) : (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
+                          <th className="py-4 px-6">Código de Inscrição</th>
+                          <th className="py-4 px-4">Pescador Atribuído</th>
+                          <th className="py-4 px-4">Campeonato</th>
+                          <th className="py-4 px-4">Status Pagamento</th>
+                          <th className="py-4 px-4">Status de Uso</th>
+                          <th className="py-4 px-6 text-right">Ações & Envio</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allTournamentCodes
+                          .filter(c => {
+                            const q = searchCodeQuery.toLowerCase();
+                            const matchesQ = !q ||
+                              (c.code && c.code.toLowerCase().includes(q)) ||
+                              (c.assignedToUserName && c.assignedToUserName.toLowerCase().includes(q)) ||
+                              (c.assignedToUserEmail && c.assignedToUserEmail.toLowerCase().includes(q)) ||
+                              (c.assignedToUserCpf && c.assignedToUserCpf.toLowerCase().includes(q)) ||
+                              (c.tournamentTitle && c.tournamentTitle.toLowerCase().includes(q));
+
+                            const matchesT = codeTourneyFilter === 'all' || c.tournamentId === codeTourneyFilter;
+                            const matchesP = codePaymentFilter === 'all' || c.paymentStatus === codePaymentFilter;
+                            const matchesU = codeUsageFilter === 'all' || (codeUsageFilter === 'active' && !c.isUsed) || (codeUsageFilter === 'used' && c.isUsed);
+
+                            return matchesQ && matchesT && matchesP && matchesU;
+                          })
+                          .map((codeItem) => {
+                            const isPaid = codeItem.paymentStatus === 'paid';
+                            const isPending = codeItem.paymentStatus === 'pending';
+                            const isFree = codeItem.paymentStatus === 'free';
+
+                            const ownerName = codeItem.assignedToUserName || 'Pescador Geral';
+                            const ownerCpf = codeItem.assignedToUserCpf || '';
+                            const tourneyTitle = codeItem.tournamentTitle || 'Torneio';
+
+                            const statusText = isPaid ? '✅ Confirmado (Pago)' : isFree ? '🆓 Isento / Grátis' : '⏳ Aguardando Validação';
+                            const whatsappMsg = `🏆 *PESCAESPORTE - CÓDIGO DE PARTICIPAÇÃO EXCLUSIVO*\n\nOlá *${ownerName}*!\n\nSeu código individual para o campeonato *${tourneyTitle}* foi gerado com proteção antifraude:\n\n🔑 *CÓDIGO DE INSCRIÇÃO:* ${codeItem.code}\n👤 *Pescador:* ${ownerName}\n📄 *CPF:* ${ownerCpf || 'Cadastrado no Sistema'}\n💰 *Status do Pagamento:* ${statusText}\n\n🔒 *AVISO DE SEGURANÇA:* Este código é intransferível e vinculado exclusivamente ao seu cadastro. Acesse o sistema e confirme sua inscrição!`;
+                            const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(whatsappMsg)}`;
+
+                            return (
+                              <tr key={codeItem.id} className="border-b border-slate-800/80 text-slate-300 hover:bg-slate-800/30 transition">
+                                {/* Code */}
+                                <td className="py-3.5 px-6">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono font-extrabold text-amber-400 text-sm bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 tracking-wider">
+                                      {codeItem.code}
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(codeItem.code);
+                                        setCopiedCodeVal(codeItem.id);
+                                        setTimeout(() => setCopiedCodeVal(null), 2000);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-white rounded transition cursor-pointer"
+                                      title="Copiar Código"
+                                    >
+                                      {copiedCodeVal === codeItem.id ? (
+                                        <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </td>
+
+                                {/* Assigned User */}
+                                <td className="py-3.5 px-4 font-bold text-white">
+                                  {codeItem.assignedToUserName ? (
+                                    <div>
+                                      <span className="block text-slate-100">{codeItem.assignedToUserName}</span>
+                                      <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono font-normal">
+                                        {codeItem.assignedToUserCpf && (
+                                          <span>CPF: {codeItem.assignedToUserCpf}</span>
+                                        )}
+                                        {codeItem.assignedToUserEmail && (
+                                          <span className="truncate max-w-[140px]">• {codeItem.assignedToUserEmail}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-500 font-normal italic">Não vinculado a usuário</span>
+                                  )}
+                                </td>
+
+                                {/* Tournament */}
+                                <td className="py-3.5 px-4 font-bold text-slate-200">
+                                  <span className="truncate block max-w-[180px]">{codeItem.tournamentTitle}</span>
+                                </td>
+
+                                {/* Payment Status */}
+                                <td className="py-3.5 px-4">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase ${
+                                      isPaid
+                                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                        : isFree
+                                        ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30'
+                                        : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                    }`}>
+                                      {isPaid ? '🟢 Confirmado' : isFree ? '🆓 Grátis / Isento' : '🟡 Pendente'}
+                                    </span>
+
+                                    {/* Quick toggle payment button */}
+                                    <button
+                                      onClick={() => handleToggleCodePayment(codeItem)}
+                                      className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                                      title="Alternar entre Pago / Pendente"
+                                    >
+                                      {isPaid ? 'Pendente?' : 'Confirmar?'}
+                                    </button>
+                                  </div>
+                                </td>
+
+                                {/* Usage Status */}
+                                <td className="py-3.5 px-4">
+                                  {codeItem.isUsed ? (
+                                    <div>
+                                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700">
+                                        🔒 Já Utilizado
+                                      </span>
+                                      <span className="block text-[9px] text-slate-500 font-mono mt-0.5">
+                                        Por: {codeItem.usedByUserName || codeItem.usedByUserEmail || 'Pescador'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                      🟢 Ativo / Disponível
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Actions & WhatsApp Share */}
+                                <td className="py-3.5 px-6 text-right">
+                                  <div className="flex items-center justify-end space-x-2">
+                                    <a
+                                      href={whatsappUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                                      title="Enviar código formatado via WhatsApp para o Pescador"
+                                    >
+                                      <MessageCircle className="h-3.5 w-3.5" />
+                                      <span className="hidden sm:inline">WhatsApp</span>
+                                    </a>
+
+                                    {!codeItem.isUsed && (
+                                      <button
+                                        onClick={() => handleDeleteCode(codeItem)}
+                                        className="p-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer"
+                                        title="Excluir Código"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2131,6 +2988,302 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   Confirmar Reprovação
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ATRIBUIR CÓDIGO INDIVIDUAL A PESCADOR (ANTIFRAUDE) */}
+      {assigningUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 rounded-xl text-amber-400">
+                  <Key className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Gerar Código Antifraude</h3>
+                  <p className="text-xs text-slate-400">Vinculado exclusivamente a este competidor</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAssigningUser(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Fisherman Summary Card */}
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-850 space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-sm shrink-0 border border-amber-500/30">
+                  {assigningUser.displayName?.charAt(0).toUpperCase() || 'P'}
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">{assigningUser.fullName || assigningUser.displayName}</h4>
+                  <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
+                    <span>CPF: <strong className="text-slate-200">{assigningUser.cpf || 'Não informado'}</strong></span>
+                    <span>•</span>
+                    <span className="truncate">{assigningUser.email}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleGenerateAssignedCode} className="space-y-4">
+              {/* Select Tournament */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                  Campeonato de Destino
+                </label>
+                <select
+                  value={assignTourneyId}
+                  onChange={(e) => {
+                    const tId = e.target.value;
+                    setAssignTourneyId(tId);
+                    const selectedT = tournaments.find(t => t.id === tId);
+                    if (selectedT) {
+                      const isPaid = selectedT.entryFeeType === 'pago';
+                      setAssignPaymentStatus(isPaid ? 'paid' : 'free');
+                      setAssignPaymentAmount(selectedT.entryFeeAmount ? String(selectedT.entryFeeAmount) : '0');
+                    }
+                  }}
+                  required
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  {tournaments.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title} ({t.entryFeeType === 'pago' ? `Taxa: R$ ${t.entryFeeAmount || 0}` : 'Inscrição Gratuita'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Payment Status & Amount */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                    Status do Pagamento
+                  </label>
+                  <select
+                    value={assignPaymentStatus}
+                    onChange={(e: any) => setAssignPaymentStatus(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="paid">🟢 Pago / Confirmado</option>
+                    <option value="pending">🟡 Pendente / Aguardando</option>
+                    <option value="free">🆓 Grátis / Isento</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                    Valor Pago (R$)
+                  </label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                    <input
+                      type="number"
+                      value={assignPaymentAmount}
+                      onChange={(e) => setAssignPaymentAmount(e.target.value)}
+                      placeholder="0,00"
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Notes */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                  Observações do Pagamento / Comprovante
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: PIX recebido em 21/08 - Comprovante autenticado"
+                  value={assignPaymentNotes}
+                  onChange={(e) => setAssignPaymentNotes(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {/* Suggested / Custom Code */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                    Código Gerado para o Usuário
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cpfDigits = assigningUser.cpf ? assigningUser.cpf.replace(/\D/g, '').slice(-4) : 'USR';
+                      setAssignCustomCode(generateUniqueTournamentCode(`TRN-${cpfDigits}`));
+                    }}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer font-mono"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    <span>Recalcular</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <Key className="absolute left-3 top-2.5 h-4 w-4 text-amber-400" />
+                  <input
+                    type="text"
+                    value={assignCustomCode}
+                    onChange={(e) => setAssignCustomCode(e.target.value.toUpperCase())}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 text-amber-400 font-mono font-extrabold tracking-wider rounded-xl pl-9 pr-4 py-2 text-sm uppercase focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  🔒 Este código só poderá ser ativado por este pescador cadastrado.
+                </p>
+              </div>
+
+              {/* Buttons */}
+              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setAssigningUser(null)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isGeneratingAssignedCode}
+                  className="px-6 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold transition cursor-pointer shadow-lg shadow-amber-950/40 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isGeneratingAssignedCode ? (
+                    <span>Emitindo Código...</span>
+                  ) : (
+                    <>
+                      <Key className="h-4 w-4" />
+                      <span>Emitir & Vincular ao Pescador</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SUCESSO - CÓDIGO GERADO COM LINK DO WHATSAPP */}
+      {generatedCodeSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-6 sm:p-8 space-y-6 text-center animate-scale-up">
+            <div className="h-14 w-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/30">
+              <CheckCircle2 className="h-8 w-8" />
+            </div>
+
+            <div>
+              <h3 className="text-xl font-extrabold text-white">Código Emitido com Sucesso!</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Atribuído exclusivamente a <strong className="text-white">{generatedCodeSuccess.userName}</strong>
+              </p>
+            </div>
+
+            {/* Code Box */}
+            <div className="p-4 bg-slate-950 rounded-2xl border border-amber-500/30 space-y-2">
+              <span className="text-[10px] text-slate-500 font-mono uppercase block">Código de Inscrição:</span>
+              <span className="font-mono font-extrabold text-2xl text-amber-400 tracking-wider block selection:bg-amber-500 selection:text-slate-950">
+                {generatedCodeSuccess.code}
+              </span>
+              <div className="flex items-center justify-center gap-2 pt-2 text-[11px] font-mono text-slate-400">
+                <span>{generatedCodeSuccess.tournamentTitle}</span>
+                <span>•</span>
+                <span className="text-emerald-400 font-bold">{generatedCodeSuccess.paymentStatus}</span>
+              </div>
+            </div>
+
+            {/* Actions: WhatsApp Direct Send & Copy */}
+            <div className="space-y-2.5">
+              <a
+                href={generatedCodeSuccess.whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>Enviar Código via WhatsApp para o Pescador</span>
+              </a>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(generatedCodeSuccess.code);
+                  showFlashMessage('📋 Código copiado para a área de transferência!', 'success');
+                }}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Copy className="h-4 w-4 text-sky-400" />
+                <span>Copiar Código</span>
+              </button>
+
+              <button
+                onClick={() => setGeneratedCodeSuccess(null)}
+                className="w-full py-2 text-slate-500 hover:text-slate-300 text-xs font-mono transition cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REJEITAR / REPROVAR EQUIPE */}
+      {rejectingTeam && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-rose-500/10 rounded-xl text-rose-400">
+                  <XCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Reprovar Equipe</h3>
+                  <p className="text-xs text-slate-400">"{rejectingTeam.name}" ({rejectingTeam.code})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRejectingTeam(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-xs font-mono font-bold text-slate-300 uppercase block">
+                Motivo da Reprovação (visível para o capitão da equipe):
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Ex: Nome da equipe inadequado, logotipo com baixa qualidade ou infração às diretrizes."
+                value={teamRejectReason}
+                onChange={(e) => setTeamRejectReason(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl p-3 text-xs focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setRejectingTeam(null)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRejectTeam}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-lg shadow-rose-950/40"
+              >
+                Confirmar Reprovação
+              </button>
             </div>
           </div>
         </div>

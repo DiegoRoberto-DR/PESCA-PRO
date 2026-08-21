@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   TrendingUp, 
   Trophy, 
@@ -8,15 +8,44 @@ import {
   Ruler, 
   MapPin, 
   Video, 
-  Image, 
   Upload, 
   AlertCircle, 
-  Sparkles,
   ExternalLink,
-  Camera
+  User,
+  CreditCard,
+  Mail,
+  ShieldCheck,
+  Key,
+  Copy,
+  Check,
+  Ticket,
+  Lock,
+  MessageCircle,
+  Tag,
+  Users,
+  Send,
+  Fish,
+  Sparkles,
+  UserPlus,
+  Trash2,
+  LogOut,
+  Image as ImageIcon,
+  Shield,
+  HelpCircle,
+  Share2
 } from 'lucide-react';
-import { UserProfile, Catch, Tournament } from '../types';
-import { submitCatch } from '../utils/dbHelpers';
+import { UserProfile, Catch, Tournament, TournamentCode, Team } from '../types';
+import { 
+  submitCatch, 
+  subscribeUserTournamentCodes, 
+  validateAndConsumeTournamentCode,
+  subscribeUserTeam,
+  createTeam,
+  joinTeamByCode,
+  removeMemberFromTeam,
+  leaveTeam,
+  updateTeam
+} from '../utils/dbHelpers';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
@@ -36,6 +65,51 @@ export default function ProfileView({
   onNavigateToTournaments,
   onLogout
 }: ProfileViewProps) {
+  // Navigation tabs in profile
+  const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'submit' | 'catches'>('registration');
+
+  // Realtime codes assigned to this user
+  const [userCodes, setUserCodes] = useState<TournamentCode[]>([]);
+  const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
+  const [activatingCodeId, setActivatingCodeId] = useState<string | null>(null);
+  const [codeActionResult, setCodeActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // User's Team State
+  const [userTeam, setUserTeam] = useState<Team | null>(null);
+  const [teamFormMode, setTeamFormMode] = useState<'create' | 'join'>('create');
+  const [teamNameInput, setTeamNameInput] = useState('');
+  const [teamSizeInput, setTeamSizeInput] = useState<number>(2);
+  const [teamLogoUrlInput, setTeamLogoUrlInput] = useState('');
+  const [teamLogoBase64, setTeamLogoBase64] = useState('');
+  const [joinTeamCodeInput, setJoinTeamCodeInput] = useState('');
+  const [teamError, setTeamError] = useState('');
+  const [teamSuccess, setTeamSuccess] = useState('');
+  const [isTeamLoading, setIsTeamLoading] = useState(false);
+  const [copiedTeamCode, setCopiedTeamCode] = useState(false);
+  const teamLogoInputRef = useRef<HTMLInputElement>(null);
+
+  // Subscribe to codes assigned to current user
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsubscribe = subscribeUserTournamentCodes(currentUser.uid, currentUser.email || '', (codes) => {
+      setUserCodes(codes);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [currentUser?.uid, currentUser?.email]);
+
+  // Subscribe to current user's team in real time
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsubscribe = subscribeUserTeam(currentUser.uid, (team) => {
+      setUserTeam(team);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [currentUser?.uid]);
+
   // Filter catches for current user
   const userCatches = catches.filter(
     c => c.userId === currentUser.uid || c.userEmail === currentUser.email
@@ -69,7 +143,7 @@ export default function ProfileView({
   });
 
   // Sync selectedTournament when participatingTournaments or selectedTournament changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (selectedTournament && participatingTournaments.some(t => t.id === selectedTournament.id)) {
       setSelectedTournamentId(selectedTournament.id);
     } else if (participatingTournaments.length > 0 && !participatingTournaments.some(t => t.id === selectedTournamentId)) {
@@ -78,6 +152,7 @@ export default function ProfileView({
       setSelectedTournamentId('');
     }
   }, [participatingTournaments.length, selectedTournament?.id]);
+
   const [species, setSpecies] = useState<string>('');
   const [location, setLocation] = useState<string>('');
   const [length, setLength] = useState<string>('');
@@ -117,6 +192,164 @@ export default function ProfileView({
     reader.readAsDataURL(file);
   };
 
+  const handleTeamLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setTeamError('Por favor, selecione um arquivo de imagem para o logo.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setTeamError('O logo deve ter no máximo 5MB.');
+      return;
+    }
+
+    setTeamError('');
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const b64 = reader.result as string;
+      setTeamLogoBase64(b64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleActivateCode = async (codeItem: TournamentCode) => {
+    if (!codeItem.tournamentId || !codeItem.code) return;
+    setCodeActionResult(null);
+    setActivatingCodeId(codeItem.id);
+
+    try {
+      const res = await validateAndConsumeTournamentCode(codeItem.tournamentId, codeItem.code, currentUser);
+      if (res.success) {
+        setCodeActionResult({
+          type: 'success',
+          message: res.message || 'Código ativado com sucesso! Você está inscrito no torneio.'
+        });
+        if (!selectedTournamentId) {
+          setSelectedTournamentId(codeItem.tournamentId);
+        }
+      } else {
+        setCodeActionResult({
+          type: 'error',
+          message: res.message || 'Não foi possível validar este código.'
+        });
+      }
+    } catch (err: any) {
+      setCodeActionResult({
+        type: 'error',
+        message: 'Erro ao ativar código: ' + (err.message || 'Tente novamente.')
+      });
+    } finally {
+      setActivatingCodeId(null);
+    }
+  };
+
+  // Team Actions
+  const handleCreateTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeamError('');
+    setTeamSuccess('');
+
+    if (!teamNameInput.trim()) {
+      setTeamError('Por favor, digite o nome da sua equipe.');
+      return;
+    }
+
+    const finalLogo = teamLogoBase64 || teamLogoUrlInput.trim();
+
+    try {
+      setIsTeamLoading(true);
+      const res = await createTeam({
+        name: teamNameInput.trim(),
+        maxMembers: teamSizeInput,
+        logoUrl: finalLogo || undefined,
+        creatorUser: currentUser,
+        tournamentIds: selectedTournamentId ? [selectedTournamentId] : []
+      });
+
+      if (res.success && res.team) {
+        setTeamSuccess(res.message);
+        setUserTeam(res.team);
+        setTeamNameInput('');
+        setTeamLogoUrlInput('');
+        setTeamLogoBase64('');
+      } else {
+        setTeamError(res.message || 'Erro ao criar equipe.');
+      }
+    } catch (err: any) {
+      setTeamError('Erro ao criar equipe: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsTeamLoading(false);
+    }
+  };
+
+  const handleJoinTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeamError('');
+    setTeamSuccess('');
+
+    if (!joinTeamCodeInput.trim()) {
+      setTeamError('Por favor, informe o código da equipe.');
+      return;
+    }
+
+    try {
+      setIsTeamLoading(true);
+      const res = await joinTeamByCode(joinTeamCodeInput.trim(), currentUser, selectedTournamentId);
+      if (res.success && res.team) {
+        setTeamSuccess(res.message);
+        setUserTeam(res.team);
+        setJoinTeamCodeInput('');
+      } else {
+        setTeamError(res.message);
+      }
+    } catch (err: any) {
+      setTeamError('Erro ao juntar-se à equipe: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsTeamLoading(false);
+    }
+  };
+
+  const handleRemoveMember = async (memberUserId: string, memberName: string) => {
+    if (!userTeam) return;
+    if (!confirm(`Tem certeza que deseja remover ${memberName} da equipe?`)) return;
+
+    try {
+      setIsTeamLoading(true);
+      const res = await removeMemberFromTeam(userTeam.id, currentUser.uid, memberUserId);
+      if (res.success) {
+        setTeamSuccess(res.message);
+      } else {
+        setTeamError(res.message);
+      }
+    } catch (err: any) {
+      setTeamError('Erro ao remover membro: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsTeamLoading(false);
+    }
+  };
+
+  const handleLeaveTeam = async () => {
+    if (!userTeam) return;
+    if (!confirm(`Tem certeza que deseja sair da equipe "${userTeam.name}"?`)) return;
+
+    try {
+      setIsTeamLoading(true);
+      const res = await leaveTeam(userTeam.id, currentUser.uid);
+      if (res.success) {
+        setTeamSuccess(res.message);
+        setUserTeam(null);
+      } else {
+        setTeamError(res.message);
+      }
+    } catch (err: any) {
+      setTeamError('Erro ao sair da equipe: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsTeamLoading(false);
+    }
+  };
+
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -148,6 +381,26 @@ export default function ProfileView({
 
     const currentTournament = tournaments.find(t => t.id === selectedTournamentId);
 
+    // =========================================================================
+    // TEAM VALIDATION RULE FOR SUBMISSIONS
+    // =========================================================================
+    const isTeamTournament = currentTournament?.teamFormat && currentTournament.teamFormat !== 'solo';
+    
+    if (isTeamTournament) {
+      if (!userTeam) {
+        setErrorMsg(`🚫 Este campeonato é no formato ${currentTournament?.teamFormat.toUpperCase()}. Você precisa criar ou juntar-se a uma equipe na aba "Minha Equipe" antes de enviar capturas.`);
+        return;
+      }
+
+      // Check if team is complete
+      const teamCapacity = userTeam.maxMembers || 2;
+      const currentMemberCount = userTeam.members ? userTeam.members.length : 0;
+      if (currentMemberCount < teamCapacity) {
+        setErrorMsg(`🚫 Sua equipe precisa estar COMPLETA (${currentMemberCount}/${teamCapacity} membros) para enviar capturas neste campeonato. Compartilhe o código "${userTeam.code}" com seus parceiros para completarem a equipe.`);
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
       await submitCatch({
@@ -156,6 +409,9 @@ export default function ProfileView({
         userId: currentUser.uid,
         userName: currentUser.displayName,
         userEmail: currentUser.email,
+        teamId: userTeam ? userTeam.id : undefined,
+        teamName: userTeam ? userTeam.name : (currentUser.teamName || undefined),
+        teamLogo: userTeam?.logoUrl || currentUser.teamLogo || undefined,
         species: species.trim(),
         length: numLength,
         location: location.trim(),
@@ -166,7 +422,6 @@ export default function ProfileView({
       });
 
       setSuccessMsg('Captura enviada com sucesso para validação da arbitragem!');
-      // Reset form
       setSpecies('');
       setLocation('');
       setLength('');
@@ -186,116 +441,883 @@ export default function ProfileView({
     }
   };
 
-  return (
-    <div className="space-y-10 animate-fade-in max-w-7xl mx-auto">
-      {/* Top 2-Column Grid matching exactly the provided design */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        {/* Left Column (5 of 12 columns) */}
-        <div className="lg:col-span-5 space-y-5">
-          
-          {/* Card 1: User Identity Card */}
-          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-8 text-center shadow-xl">
-            <div className="relative inline-block mx-auto">
-              <div className="w-28 h-28 rounded-full border-2 border-emerald-500/40 p-1 flex items-center justify-center bg-slate-900 overflow-hidden shadow-inner">
-                {currentUser.photoURL ? (
-                  <img 
-                    src={currentUser.photoURL} 
-                    alt={currentUser.displayName} 
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full rounded-full bg-[#1b1e22] flex items-center justify-center text-slate-300 font-extrabold text-3xl">
-                    {currentUser.displayName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
-            </div>
+  const isCaptain = userTeam && (userTeam.creatorId === currentUser.uid || userTeam.members.some(m => m.userId === currentUser.uid && m.role === 'captain'));
+  const isTeamComplete = userTeam && userTeam.members && userTeam.members.length >= userTeam.maxMembers;
 
-            <h2 className="text-2xl font-black text-white uppercase tracking-tight mt-4">
-              {currentUser.displayName}
-            </h2>
-            <p className="text-xs font-black text-[#00c853] uppercase tracking-widest mt-1">
-              {currentUser.teamName || 'SEM EQUIPE'}
+  return (
+    <div className="space-y-8 animate-fade-in max-w-7xl mx-auto pb-12">
+      {/* Profile Navigation Bar */}
+      <div className="bg-[#121316] border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
+            {currentUser.photoURL ? (
+              <img 
+                src={currentUser.photoURL} 
+                alt={currentUser.displayName} 
+                referrerPolicy="no-referrer"
+                className="w-full h-full rounded-2xl object-cover"
+              />
+            ) : (
+              currentUser.displayName.charAt(0).toUpperCase()
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-black text-white uppercase tracking-tight">
+                {currentUser.fullName || currentUser.displayName}
+              </h2>
+              {currentUser.nickname && (
+                <span className="text-xs font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                  @{currentUser.nickname}
+                </span>
+              )}
+            </div>
+            <p className="text-xs font-mono text-slate-400">
+              {currentUser.email} {currentUser.cpf ? `• CPF: ${currentUser.cpf}` : ''}
+              {userTeam && ` • Equipe: ${userTeam.name}`}
             </p>
           </div>
-
-          {/* Card 2: Estatísticas Gerais */}
-          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 shadow-xl">
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp className="h-4 w-4 text-emerald-400" />
-              <h3 className="text-xs font-black text-white uppercase tracking-wider">
-                ESTATÍSTICAS GERAIS
-              </h3>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              {/* Total Capturas */}
-              <div className="bg-[#1a1c20] border border-slate-800/80 rounded-2xl p-4">
-                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider block">
-                  TOTAL CAPTURAS
-                </span>
-                <p className="text-2xl font-black text-white mt-1">
-                  {totalCatchesCount}
-                </p>
-              </div>
-
-              {/* Média Tamanho */}
-              <div className="bg-[#1a1c20] border border-slate-800/80 rounded-2xl p-4">
-                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider block">
-                  MÉDIA TAMANHO
-                </span>
-                <p className="text-2xl font-black text-white mt-1">
-                  {avgLength}cm
-                </p>
-              </div>
-
-              {/* Maior Peixe */}
-              <div className="bg-[#1a1c20] border border-slate-800/80 rounded-2xl p-4">
-                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider block">
-                  MAIOR PEIXE
-                </span>
-                <p className="text-2xl font-black text-white mt-1">
-                  {personalBest}cm
-                </p>
-              </div>
-
-              {/* Aproveitamento */}
-              <div className="bg-[#1a1c20] border border-slate-800/80 rounded-2xl p-4">
-                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider block">
-                  APROVEITAMENTO
-                </span>
-                <p className="text-2xl font-black text-[#00c853] mt-1">
-                  {approvalRate}%
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Conquistas */}
-          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 shadow-xl">
-            <div className="flex items-center gap-2 mb-4">
-              <Trophy className="h-4 w-4 text-amber-400" />
-              <h3 className="text-xs font-black text-white uppercase tracking-wider">
-                CONQUISTAS
-              </h3>
-            </div>
-
-            <div className="py-8 text-center">
-              <p className="text-xs sm:text-sm text-slate-500 italic">
-                Nenhum título conquistado ainda.
-              </p>
-            </div>
-          </div>
-
         </div>
 
-        {/* Right Column (7 of 12 columns): Form "ENVIAR CAPTURA" */}
-        <div className="lg:col-span-7">
-          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+        {/* Tab Buttons */}
+        <div className="flex flex-wrap bg-[#1b1e22] p-1.5 rounded-2xl border border-slate-800 gap-1">
+          <button
+            onClick={() => setActiveTab('registration')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'registration'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <User className="h-4 w-4" />
+            <span>Meu Cadastro</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('codes')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+              activeTab === 'codes'
+                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Ticket className="h-4 w-4" />
+            <span>Códigos de Inscrição</span>
+            {userCodes.length > 0 && (
+              <span className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                activeTab === 'codes' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              }`}>
+                {userCodes.length}
+              </span>
+            )}
+          </button>
+
+          {/* New Tab: Minha Equipe */}
+          <button
+            onClick={() => setActiveTab('team')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+              activeTab === 'team'
+                ? 'bg-[#00c853] text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="h-4 w-4" />
+            <span>Minha Equipe</span>
+            {userTeam && (
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('submit')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'submit'
+                ? 'bg-sky-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Send className="h-4 w-4" />
+            <span>Enviar Captura</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('catches')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'catches'
+                ? 'bg-purple-500 text-white shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Trophy className="h-4 w-4" />
+            <span>Minhas Capturas ({userCatches.length})</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* TAB 1: MEU CADASTRO & DADOS PESSOAIS */}
+      {/* ========================================================================= */}
+      {activeTab === 'registration' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
+          {/* Left: Cadastro Card */}
+          <div className="lg:col-span-7 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20">
+                  <User className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase">Dados do Cadastro de Competidor</h3>
+                  <p className="text-xs text-slate-400">Informações oficiais registradas e vinculadas aos códigos antifraude</p>
+                </div>
+              </div>
+
+              <span className={`text-[10px] font-mono px-3 py-1 rounded-full font-bold uppercase ${
+                currentUser.status === 'blocked' 
+                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+                  : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+              }`}>
+                {currentUser.status === 'blocked' ? '🛑 Cadastro Bloqueado' : '🟢 Cadastro Ativo & Homologado'}
+              </span>
+            </div>
+
+            {/* Registration fields grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">Nome Completo</span>
+                <span className="text-sm font-bold text-white block mt-1">
+                  {currentUser.fullName || currentUser.displayName}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">Apelido de Pesca</span>
+                <span className="text-sm font-bold text-amber-400 block mt-1">
+                  {currentUser.nickname ? `@${currentUser.nickname}` : 'Não informado'}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold uppercase text-slate-400">CPF (Vinculado)</span>
+                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    🔒 Antifraude
+                  </span>
+                </div>
+                <span className="text-sm font-mono font-bold text-white block mt-1">
+                  {currentUser.cpf ? currentUser.cpf : <span className="text-slate-500 italic">Não cadastrado</span>}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">E-mail de Login</span>
+                <span className="text-xs font-mono text-slate-200 block mt-1 truncate">
+                  {currentUser.email}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">Equipe Vinculada</span>
+                <span className="text-sm font-bold text-[#00c853] block mt-1 flex items-center gap-2">
+                  {userTeam ? (
+                    <>
+                      <span>{userTeam.name}</span>
+                      <span className="text-[10px] font-mono text-slate-400">({userTeam.code})</span>
+                    </>
+                  ) : (
+                    <span className="text-slate-400 font-normal">Nenhuma equipe ativa</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">Endereço / Cidade e Estado</span>
+                <span className="text-xs text-slate-300 block mt-1">
+                  {currentUser.address || 'Não informado'}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick action bar */}
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="space-y-0.5 text-center sm:text-left">
+                <span className="text-xs font-bold text-emerald-300 block">
+                  👥 Sistema de Equipes & Duplas
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {userTeam
+                    ? `Você é integrante da equipe "${userTeam.name}" (${userTeam.members?.length || 0}/${userTeam.maxMembers} membros).`
+                    : 'Crie sua equipe de 2 a 5 pessoas ou entre na equipe de um amigo com o código único.'}
+                </span>
+              </div>
+              <button
+                onClick={() => setActiveTab('team')}
+                className="px-4 py-2 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-md shrink-0"
+              >
+                Gerenciar Equipe
+              </button>
+            </div>
+          </div>
+
+          {/* Right: Anti-fraud Explanation & Security Card */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 text-emerald-400">
+                <ShieldCheck className="h-6 w-6" />
+                <h4 className="text-base font-black text-white uppercase">Sistema de Proteção Antifraude</h4>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Na <strong>Fisgada Pro</strong>, cada código de participação emitido é <em>exclusivo e de uso único</em>. 
+                Ao ser consumido, ele é permanentemente vinculado ao seu CPF e Cadastro de Competidor, prevenindo fraudes e acessos não autorizados.
+              </p>
+
+              <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="flex items-start gap-2 text-xs text-slate-400">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Código de uso único e intransferível.</span>
+                </div>
+                <div className="flex items-start gap-2 text-xs text-slate-400">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Equipes com travas de capacidade (2 a 5 participantes).</span>
+                </div>
+                <div className="flex items-start gap-2 text-xs text-slate-400">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Envio de capturas em campeonatos de duplas liberado apenas com equipe completa.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: CÓDIGOS DE INSCRIÇÃO */}
+      {/* ========================================================================= */}
+      {activeTab === 'codes' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div>
+                <h3 className="text-lg font-black text-white uppercase flex items-center gap-2">
+                  <Ticket className="h-5 w-5 text-amber-400" />
+                  <span>Meus Códigos de Inscrição Atribuídos</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Códigos exclusivos liberados pela arbitragem após a validação do pagamento.
+                </p>
+              </div>
+
+              <a
+                href={`https://wa.me/5519987626991?text=${encodeURIComponent(
+                  `Olá! Sou o competidor ${currentUser.displayName} (${currentUser.email}). Gostaria de solicitar um novo código de participação para o torneio.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>Solicitar Código no WhatsApp</span>
+              </a>
+            </div>
+
+            {/* Notification alert */}
+            {codeActionResult && (
+              <div className={`p-4 rounded-2xl text-xs flex items-center gap-2.5 ${
+                codeActionResult.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              }`}>
+                {codeActionResult.type === 'success' ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                )}
+                <span>{codeActionResult.message}</span>
+              </div>
+            )}
+
+            {userCodes.length === 0 ? (
+              <div className="py-12 text-center space-y-4">
+                <div className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+                  <Ticket className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-300">Nenhum código atribuído ainda</h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                    Assim que o Administrador gerar seu código exclusivo para um campeonato, ele aparecerá aqui com opção de ativação imediata.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {userCodes.map((c) => {
+                  const isActivating = activatingCodeId === c.id;
+                  const isCopied = copiedCodeId === c.id;
+
+                  return (
+                    <div
+                      key={c.id}
+                      className={`p-5 rounded-2xl border transition space-y-4 flex flex-col justify-between ${
+                        c.isUsed
+                          ? 'bg-[#15171a]/60 border-slate-850 opacity-80'
+                          : 'bg-[#181a1e] border-amber-500/40 shadow-lg shadow-amber-950/20'
+                      }`}
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono font-bold uppercase text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            {c.tournamentTitle || 'Torneio Oficial'}
+                          </span>
+                          <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                            c.isUsed ? 'bg-slate-800 text-slate-400' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          }`}>
+                            {c.isUsed ? '🔒 Utilizado' : '🟢 Disponível'}
+                          </span>
+                        </div>
+
+                        {/* Code Display Box */}
+                        <div className="bg-[#121316] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono uppercase text-slate-500">Código de Participação</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(c.code);
+                                setCopiedCodeId(c.id);
+                                setTimeout(() => setCopiedCodeId(null), 2000);
+                              }}
+                              className="text-[10px] font-mono text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                            >
+                              {isCopied ? (
+                                <>
+                                  <Check className="h-3 w-3 text-emerald-400" />
+                                  <span className="text-emerald-400">Copiado!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copiar</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="font-mono font-black text-lg text-amber-400 tracking-wider text-center select-all">
+                            {c.code}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action Button: 1-Click Activate */}
+                      <div>
+                        {c.isUsed ? (
+                          <div className="w-full py-2.5 text-center text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+                            ✓ Inscrição Homologada & Ativa
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleActivateCode(c)}
+                            disabled={isActivating}
+                            className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer shadow-lg shadow-amber-950/40 flex items-center justify-center gap-2 disabled:opacity-50"
+                          >
+                            {isActivating ? (
+                              <span>Ativando Inscrição...</span>
+                            ) : (
+                              <>
+                                <Key className="h-4 w-4" />
+                                <span>Ativar Inscrição no Torneio</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: MINHA EQUIPE (CRIAR, ENTRAR, GERENCIAR DUPLAS E EQUIPES) */}
+      {/* ========================================================================= */}
+      {activeTab === 'team' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Team Feedback Alerts */}
+          {teamError && (
+            <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl text-xs flex items-center gap-2.5">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{teamError}</span>
+            </div>
+          )}
+
+          {teamSuccess && (
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl text-xs flex items-center gap-2.5">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>{teamSuccess}</span>
+            </div>
+          )}
+
+          {userTeam ? (
+            /* =================================================================== */
+            /* USER HAS A TEAM: DISPLAY TEAM DASHBOARD */
+            /* =================================================================== */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Team Details & Members */}
+              <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+                  <div className="flex items-center gap-4">
+                    {/* Team Logo / Shield */}
+                    <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-lg">
+                      {userTeam.logoUrl ? (
+                        <img 
+                          src={userTeam.logoUrl} 
+                          alt={userTeam.name} 
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Users className="h-8 w-8 text-emerald-400" />
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
+                          {userTeam.name}
+                        </h2>
+                        {isCaptain && (
+                          <span className="text-[10px] font-mono font-bold uppercase text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            👑 Capitão
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400 font-mono mt-0.5">
+                        Capacidade: {userTeam.maxMembers} Participantes ({userTeam.maxMembers === 2 ? 'Dupla' : userTeam.maxMembers === 3 ? 'Trio' : userTeam.maxMembers === 4 ? 'Quarteto' : 'Quinteto'})
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Status Badge */}
+                  <div>
+                    {isTeamComplete ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold">
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>EQUIPE COMPLETA ({userTeam.members.length}/{userTeam.maxMembers})</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-mono font-bold">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        <span>INCOMPLETA ({userTeam.members.length}/{userTeam.maxMembers})</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Team Code Highlight Card */}
+                <div className="bg-[#181a1e] border border-emerald-500/40 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1 text-center sm:text-left">
+                    <span className="text-[10px] font-mono uppercase text-emerald-400 font-bold block">
+                      Código Único da Equipe (Para convidar parceiros)
+                    </span>
+                    <div className="text-2xl sm:text-3xl font-black font-mono text-white tracking-widest select-all">
+                      {userTeam.code}
+                    </div>
+                    <span className="text-[11px] text-slate-400 block">
+                      Envie este código para seus parceiros entrarem na equipe pelo perfil deles.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(userTeam.code);
+                        setCopiedTeamCode(true);
+                        setTimeout(() => setCopiedTeamCode(false), 2500);
+                      }}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer"
+                    >
+                      {copiedTeamCode ? (
+                        <>
+                          <Check className="h-4 w-4 text-emerald-400" />
+                          <span className="text-emerald-400">Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-4 w-4" />
+                          <span>Copiar Código</span>
+                        </>
+                      )}
+                    </button>
+
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(
+                        `🎣 Venha fazer parte da minha equipe "${userTeam.name}" na Fisgada Pro! Use o código de equipe: *${userTeam.code}* no seu perfil para se juntar à equipe e competirmos juntos.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <Share2 className="h-4 w-4" />
+                      <span>Convidar no WhatsApp</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Team Members List */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
+                      <Users className="h-4 w-4 text-emerald-400" />
+                      <span>Integrantes da Equipe ({userTeam.members.length} de {userTeam.maxMembers})</span>
+                    </h3>
+                    {!isTeamComplete && (
+                      <span className="text-[11px] font-mono text-amber-400">
+                        Falta(m) {userTeam.maxMembers - userTeam.members.length} integrante(s)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {userTeam.members.map((member, idx) => (
+                      <div
+                        key={member.userId || idx}
+                        className="bg-[#181a1e] border border-slate-800/80 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center font-bold text-sm text-white shrink-0 overflow-hidden">
+                            {member.userPhoto ? (
+                              <img 
+                                src={member.userPhoto} 
+                                alt={member.userName} 
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              member.userName.charAt(0).toUpperCase()
+                            )}
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-xs font-bold text-white truncate max-w-[140px]">
+                                {member.userName}
+                              </h4>
+                              {member.role === 'captain' && (
+                                <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 px-1 rounded border border-amber-500/20">
+                                  👑 Capitão
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]">
+                              {member.userEmail}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Captain controls: Remove member */}
+                        {isCaptain && member.userId !== currentUser.uid && (
+                          <button
+                            onClick={() => handleRemoveMember(member.userId, member.userName)}
+                            disabled={isTeamLoading}
+                            className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                            title="Remover da equipe"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Empty Slots */}
+                    {Array.from({ length: Math.max(0, userTeam.maxMembers - userTeam.members.length) }).map((_, slotIdx) => (
+                      <div
+                        key={`empty-${slotIdx}`}
+                        className="border-2 border-dashed border-slate-800 rounded-2xl p-3.5 flex items-center justify-center text-center text-xs text-slate-500 font-mono"
+                      >
+                        + Vaga disponível (Aguardando entrada)
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Team Controls & Leave button */}
+                <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    onClick={handleLeaveTeam}
+                    disabled={isTeamLoading}
+                    className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>Sair da Equipe</span>
+                  </button>
+
+                  {!isTeamComplete && (
+                    <span className="text-xs text-amber-400/90 font-mono">
+                      ⚠️ Complete a equipe para liberar o envio de capturas em campeonatos de equipe.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Rules & Info Card */}
+              <div className="lg:col-span-4 space-y-6">
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
+                  <div className="flex items-center gap-2 text-[#00c853]">
+                    <Shield className="h-5 w-5" />
+                    <h3 className="text-base font-black text-white uppercase">Regras de Equipe</h3>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Em campeonatos com formato de <strong>Dupla</strong> ou <strong>Equipe</strong>, as pontuações e capturas são creditadas tanto ao competidor quanto ao placar oficial da equipe.
+                  </p>
+
+                  <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs text-slate-400">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>Limite fixo de membros ({userTeam.maxMembers} pessoas).</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>O Capitão pode gerenciar e remover participantes.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>Não é permitido participar do mesmo campeonato por duas equipes diferentes.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* =================================================================== */
+            /* USER HAS NO TEAM: SHOW CREATE TEAM & JOIN TEAM FORMS */
+            /* =================================================================== */
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+                {/* Form selector buttons: Criar Equipe vs Juntar-se a Equipe */}
+                <div className="flex bg-[#181a1e] p-1.5 rounded-2xl border border-slate-800 gap-1">
+                  <button
+                    onClick={() => setTeamFormMode('create')}
+                    className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer ${
+                      teamFormMode === 'create'
+                        ? 'bg-[#00c853] text-slate-950 shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Users className="h-4 w-4" />
+                    <span>Criar Nova Equipe</span>
+                  </button>
+
+                  <button
+                    onClick={() => setTeamFormMode('join')}
+                    className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer ${
+                      teamFormMode === 'join'
+                        ? 'bg-amber-500 text-slate-950 shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    <span>Juntar-se a uma Equipe</span>
+                  </button>
+                </div>
+
+                {teamFormMode === 'create' ? (
+                  /* Form: CRIAR EQUIPE */
+                  <form onSubmit={handleCreateTeam} className="space-y-5">
+                    <div>
+                      <h3 className="text-lg font-black text-white uppercase">Criar Equipe / Dupla de Pesca</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Defina o nome, a quantidade de membros (2 a 5 pessoas) e o logotipo da sua equipe.
+                      </p>
+                    </div>
+
+                    {/* 1. Nome da Equipe */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                        Nome da Equipe / Barco *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Tucuna Brothers, Equipe Gigantes do Rio, etc."
+                        value={teamNameInput}
+                        onChange={(e) => setTeamNameInput(e.target.value)}
+                        className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    {/* 2. Quantidade de Membros (2 a 5 pessoas) */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                        Quantidade de Integrantes da Equipe (2 a 5 Pessoas) *
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        {[
+                          { count: 2, label: 'Dupla (2 Pessoas)' },
+                          { count: 3, label: 'Trio (3 Pessoas)' },
+                          { count: 4, label: 'Quarteto (4 Pessoas)' },
+                          { count: 5, label: 'Quinteto (5 Pessoas)' }
+                        ].map((opt) => (
+                          <button
+                            key={opt.count}
+                            type="button"
+                            onClick={() => setTeamSizeInput(opt.count)}
+                            className={`p-3 rounded-2xl text-xs font-bold border transition text-center cursor-pointer ${
+                              teamSizeInput === opt.count
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-extrabold shadow-sm'
+                                : 'bg-[#1b1e22] border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <span className="text-base font-black block">{opt.count}</span>
+                            <span className="text-[10px] block mt-0.5">{opt.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 3. Logo / Imagem da Equipe */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                        Logotipo / Escudo da Equipe (Opcional)
+                      </label>
+
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="flex-1 space-y-2">
+                          <input
+                            type="url"
+                            placeholder="Cole o link da imagem (URL) ou envie abaixo"
+                            value={teamLogoUrlInput}
+                            onChange={(e) => {
+                              setTeamLogoUrlInput(e.target.value);
+                              if (e.target.value) setTeamLogoBase64('');
+                            }}
+                            className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none"
+                          />
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="file"
+                              ref={teamLogoInputRef}
+                              onChange={handleTeamLogoFileChange}
+                              accept="image/*"
+                              className="hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => teamLogoInputRef.current?.click()}
+                              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer"
+                            >
+                              <Upload className="h-3.5 w-3.5 text-emerald-400" />
+                              <span>Enviar Imagem do Dispositivo</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Preview */}
+                        <div className="w-20 h-20 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                          {teamLogoBase64 || teamLogoUrlInput ? (
+                            <img
+                              src={teamLogoBase64 || teamLogoUrlInput}
+                              alt="Preview Logo"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <ImageIcon className="h-6 w-6 text-slate-600" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isTeamLoading}
+                      className="w-full py-3.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60 disabled:opacity-50"
+                    >
+                      {isTeamLoading ? 'Criando Equipe...' : 'Criar Equipe e Gerar Código'}
+                    </button>
+                  </form>
+                ) : (
+                  /* Form: JUNTAR-SE A UMA EQUIPE */
+                  <form onSubmit={handleJoinTeam} className="space-y-5">
+                    <div>
+                      <h3 className="text-lg font-black text-white uppercase">Juntar-se a uma Equipe Existente</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Insira o código exclusivo fornecido pelo capitão da sua equipe para entrar no time.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                        Código Único da Equipe (Ex: EQP-8492-XP) *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Digite o código da equipe"
+                        value={joinTeamCodeInput}
+                        onChange={(e) => setJoinTeamCodeInput(e.target.value.toUpperCase())}
+                        className="w-full bg-[#1b1e22] border border-slate-800 focus:border-amber-500 text-amber-400 font-mono font-bold text-center tracking-widest rounded-xl px-4 py-3.5 text-base sm:text-lg uppercase focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isTeamLoading}
+                      className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-amber-950/60 disabled:opacity-50"
+                    >
+                      {isTeamLoading ? 'Validando Entrada...' : 'Entrar na Equipe'}
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {/* Right Column: Info Card */}
+              <div className="lg:col-span-4 space-y-6">
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
+                  <div className="flex items-center gap-2 text-emerald-400">
+                    <ShieldCheck className="h-5 w-5" />
+                    <h3 className="text-base font-black text-white uppercase">Como Funcionam as Equipes</h3>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    O sistema de equipes da <strong>Fisgada Pro</strong> permite disputar campeonatos em duplas, trios ou quartetos com total segurança antifraude.
+                  </p>
+
+                  <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs text-slate-400">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>Crie a equipe e receba o código único na hora.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>Compartilhe o código com seus parceiros para completarem o time.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>Em campeonatos de equipe, o envio de capturas é liberado quando o time estiver completo.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 4: ENVIAR CAPTURA */}
+      {/* ========================================================================= */}
+      {activeTab === 'submit' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
+          {/* Left Column: Form "ENVIAR CAPTURA" */}
+          <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
             <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight mb-5">
-              ENVIAR CAPTURA
+              ENVIAR CAPTURA PARA MODERAÇÃO
             </h2>
 
             {/* Error & Success Feedback Alerts */}
@@ -334,7 +1356,7 @@ export default function ProfileView({
                       </option>
                       {participatingTournaments.map((t) => (
                         <option key={t.id} value={t.id} className="bg-[#1b1e22] text-white">
-                          {t.title} {t.status === 'completed' ? '(Encerrado)' : ''}
+                          {t.title} ({t.teamFormat ? t.teamFormat.toUpperCase() : 'SOLO'}) {t.status === 'completed' ? '(Encerrado)' : ''}
                         </option>
                       ))}
                     </>
@@ -345,26 +1367,39 @@ export default function ProfileView({
                 {participatingTournaments.length === 0 && (
                   <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-center justify-between gap-3">
                     <span className="leading-tight">
-                      Você ainda não está inscrito em nenhum torneio. Inscreva-se para poder enviar capturas.
+                      Você ainda não está inscrito em nenhum torneio. Ative um código de participação na aba "Códigos de Inscrição".
                     </span>
-                    {onNavigateToTournaments && (
-                      <button
-                        type="button"
-                        onClick={onNavigateToTournaments}
-                        className="px-3 py-1.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
-                      >
-                        Participar
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('codes')}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
+                    >
+                      Ver Códigos
+                    </button>
                   </div>
                 )}
               </div>
+
+              {/* Team info badge for this tournament */}
+              {userTeam && (
+                <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Users className="h-4 w-4 text-emerald-400" />
+                    <span>Equipe vinculada: <strong>{userTeam.name}</strong> ({userTeam.members?.length}/{userTeam.maxMembers} membros)</span>
+                  </div>
+                  <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                    isTeamComplete ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  }`}>
+                    {isTeamComplete ? '🟢 Equipe Completa' : '⚠️ Equipe Incompleta'}
+                  </span>
+                </div>
+              )}
 
               {/* 2. Espécie */}
               <div>
                 <input
                   type="text"
-                  placeholder="Espécie"
+                  placeholder="Espécie (Ex: Tucunaré Azul, Traíra, Dourado)"
                   value={species}
                   onChange={(e) => setSpecies(e.target.value)}
                   className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
@@ -376,7 +1411,7 @@ export default function ProfileView({
               <div>
                 <input
                   type="text"
-                  placeholder="Local da Captura (Ex: Pesqueiro do Carlão)"
+                  placeholder="Local da Captura (Ex: Represa de Furnas - MG)"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
@@ -384,12 +1419,13 @@ export default function ProfileView({
                 />
               </div>
 
-              {/* 4. Tamanho (cm) */}
+              {/* 4. Comprimento (cm) */}
               <div>
                 <input
                   type="number"
-                  step="0.1"
-                  placeholder="Tamanho (cm)"
+                  step="0.5"
+                  min="1"
+                  placeholder="Comprimento em cm (Ex: 58.5)"
                   value={length}
                   onChange={(e) => setLength(e.target.value)}
                   className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
@@ -397,213 +1433,218 @@ export default function ProfileView({
                 />
               </div>
 
-              {/* 5. URL Vídeo Início (Fisgada) */}
-              <div>
+              {/* 5. Foto da Captura com Régua */}
+              <div className="space-y-2 pt-1">
+                <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                  Foto da Medição com Régua / Fita Métrica Oficial *
+                </label>
+
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="url"
+                    placeholder="URL da Foto ou faça o upload abaixo"
+                    value={photoUrl}
+                    onChange={(e) => {
+                      setPhotoUrl(e.target.value);
+                      if (e.target.value) setPhotoBase64('');
+                    }}
+                    className="flex-1 bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer shrink-0"
+                    >
+                      <Upload className="h-4 w-4 text-emerald-400" />
+                      <span>Upload Foto</span>
+                    </button>
+                  </div>
+                </div>
+
+                {photoBase64 && (
+                  <div className="mt-2 relative w-full h-32 rounded-xl overflow-hidden border border-slate-800 bg-black/40">
+                    <img 
+                      src={photoBase64} 
+                      alt="Preview Captura" 
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* 6. URLs de Vídeo (Opcionais) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <input
-                  type="text"
-                  placeholder="URL Vídeo Início (Fisgada)"
+                  type="url"
+                  placeholder="URL Vídeo Início / Fisgada (Opcional)"
                   value={videoStartUrl}
                   onChange={(e) => setVideoStartUrl(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
+                  className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition"
                 />
-              </div>
 
-              {/* 6. URL Vídeo Final (Embarque/Medição) */}
-              <div>
                 <input
-                  type="text"
-                  placeholder="URL Vídeo Final (Embarque/Medição)"
+                  type="url"
+                  placeholder="URL Vídeo Final / Soltura (Opcional)"
                   value={videoEndUrl}
                   onChange={(e) => setVideoEndUrl(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
+                  className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition"
                 />
               </div>
 
-              {/* 7. URL Foto da Medição with direct file upload trigger */}
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="URL Foto da Medição"
-                  value={photoUrl}
-                  onChange={(e) => {
-                    setPhotoUrl(e.target.value);
-                    setPhotoBase64('');
-                  }}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl pl-4 pr-12 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
-                />
-
-                {/* Upload Button overlay */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute right-2.5 top-2.5 p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 rounded-lg transition text-xs flex items-center gap-1 cursor-pointer"
-                  title="Fazer upload de foto do peixe"
-                >
-                  <Upload className="h-4 w-4" />
-                </button>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-              </div>
-
-              {/* Photo Preview if loaded */}
-              {photoBase64 && (
-                <div className="relative w-24 h-16 rounded-xl overflow-hidden border border-emerald-500/50 shadow-md">
-                  <img 
-                    src={photoBase64} 
-                    alt="Preview" 
-                    className="w-full h-full object-cover"
-                  />
-                  <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-emerald-400 font-mono text-center">
-                    Foto pronta
-                  </span>
-                </div>
-              )}
-
-              {/* 8. Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full bg-[#00c853] hover:bg-[#00e676] active:bg-[#00b248] text-slate-950 font-black text-xs sm:text-sm py-4 px-4 rounded-xl uppercase tracking-wider shadow-lg shadow-emerald-950/40 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                disabled={isSubmitting || participatingTournaments.length === 0}
+                className="w-full py-4 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60 disabled:opacity-50 mt-4"
               >
-                {isSubmitting ? 'ENVIANDO PARA VALIDAÇÃO...' : 'ENVIAR PARA VALIDAÇÃO'}
+                {isSubmitting ? 'Enviando Captura...' : 'Submeter Captura para Arbitragem'}
               </button>
             </form>
           </div>
-        </div>
 
-      </div>
+          {/* Right Column: Submission Guidelines */}
+          <div className="lg:col-span-4 space-y-6">
+            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
+              <div className="flex items-center gap-2 text-emerald-400">
+                <ShieldCheck className="h-5 w-5" />
+                <h3 className="text-base font-black text-white uppercase">Critérios de Homologação</h3>
+              </div>
 
-      {/* Bottom Section: MINHAS CAPTURAS */}
-      <div className="pt-6">
-        <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight mb-6">
-          MINHAS CAPTURAS
-        </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Para que sua captura seja validada no ranking oficial pelos moderadores:
+              </p>
 
-        {userCatches.length === 0 ? (
-          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-3">
-            <Trophy className="h-10 w-10 text-slate-600 mx-auto" />
-            <h4 className="text-base font-bold text-white uppercase">Nenhuma captura enviada ainda</h4>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Preencha o formulário acima com as medidas e fotos/vídeos da sua pesca para registrar seu primeiro exemplar no campeonato!
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {userCatches.map((item) => (
-              <div 
-                key={item.id}
-                className="bg-[#121316] border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-slate-700 transition"
-              >
-                <div>
-                  {/* Photo with status badge */}
-                  <div className="relative aspect-video bg-slate-950 overflow-hidden">
-                    <img 
-                      src={item.photoUrl} 
-                      alt={item.species} 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#121316] via-transparent to-transparent"></div>
-                    
-                    {/* Status Badge */}
-                    <div className="absolute top-3 left-3">
-                      {item.status === 'approved' && (
-                        <span className="bg-[#00c853] text-slate-950 font-black text-[10px] uppercase font-mono px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> Homologado
-                        </span>
-                      )}
-                      {item.status === 'pending' && (
-                        <span className="bg-amber-500 text-slate-950 font-black text-[10px] uppercase font-mono px-2.5 py-1 rounded-full shadow-md flex items-center gap-1 animate-pulse">
-                          <Clock className="h-3 w-3" /> Em Moderação
-                        </span>
-                      )}
-                      {item.status === 'rejected' && (
-                        <span className="bg-rose-500 text-white font-black text-[10px] uppercase font-mono px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">
-                          <XCircle className="h-3 w-3" /> Não Aceito
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="absolute bottom-3 left-3 right-3 flex justify-between items-center text-xs text-white font-bold">
-                      <span className="bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 font-mono text-emerald-400">
-                        {item.length} cm
-                      </span>
-                      {item.weight && (
-                        <span className="bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 font-mono text-amber-400">
-                          {item.weight} kg
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Catch Details */}
-                  <div className="p-5 space-y-3">
-                    <div>
-                      <h4 className="text-base font-bold text-white">{item.species}</h4>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5 truncate">{item.tournamentTitle}</p>
-                    </div>
-
-                    <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-                      <span className="truncate">{item.location}</span>
-                    </div>
-
-                    {/* Video Proofs links if provided */}
-                    {(item.videoStartUrl || item.videoEndUrl) && (
-                      <div className="pt-1 flex flex-wrap gap-2">
-                        {item.videoStartUrl && (
-                          <a
-                            href={item.videoStartUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 bg-slate-900 text-sky-400 hover:text-sky-300 rounded-lg border border-slate-800"
-                          >
-                            <Video className="h-3 w-3" />
-                            <span>Vídeo Fisgada</span>
-                            <ExternalLink className="h-2.5 w-2.5 ml-0.5" />
-                          </a>
-                        )}
-                        {item.videoEndUrl && (
-                          <a
-                            href={item.videoEndUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 bg-slate-900 text-emerald-400 hover:text-emerald-300 rounded-lg border border-slate-800"
-                          >
-                            <Video className="h-3 w-3" />
-                            <span>Vídeo Medição</span>
-                            <ExternalLink className="h-2.5 w-2.5 ml-0.5" />
-                          </a>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Moderator Note */}
-                    {item.moderatorNotes && (
-                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-[11px] text-slate-300">
-                        <span className="font-mono text-amber-400 font-bold block mb-0.5">Nota da Arbitragem:</span>
-                        <p className="italic">{item.moderatorNotes}</p>
-                      </div>
-                    )}
-                  </div>
+              <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs text-slate-400">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>A boca do peixe deve estar encostada no batente zero da régua.</span>
                 </div>
-
-                <div className="p-4 pt-0 border-t border-slate-800/60 mt-2 text-right">
-                  <span className="text-[10px] font-mono text-slate-500">
-                    ID: #{item.id.slice(0, 8)}
-                  </span>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>A numeração dos centímetros deve estar 100% nítida na foto.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Em campeonatos de equipe/duplas, a equipe deve estar completa no momento do envio.</span>
                 </div>
               </div>
-            ))}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 5: MINHAS CAPTURAS */}
+      {/* ========================================================================= */}
+      {activeTab === 'catches' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-[#121316] border border-slate-800 rounded-2xl p-4 text-center">
+              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Total Enviado</span>
+              <span className="text-xl font-black text-white block mt-1">{totalCatchesCount}</span>
+            </div>
+
+            <div className="bg-[#121316] border border-slate-800 rounded-2xl p-4 text-center">
+              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Homologados</span>
+              <span className="text-xl font-black text-emerald-400 block mt-1">{approvedCatches.length}</span>
+            </div>
+
+            <div className="bg-[#121316] border border-slate-800 rounded-2xl p-4 text-center">
+              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Maior Peixe</span>
+              <span className="text-xl font-black text-amber-400 block mt-1">{personalBest} cm</span>
+            </div>
+
+            <div className="bg-[#121316] border border-slate-800 rounded-2xl p-4 text-center">
+              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Taxa Aprovação</span>
+              <span className="text-xl font-black text-sky-400 block mt-1">{approvalRate}%</span>
+            </div>
+          </div>
+
+          {userCatches.length === 0 ? (
+            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-12 text-center space-y-4 shadow-xl">
+              <div className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+                <Fish className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white uppercase">Nenhuma captura registrada</h3>
+                <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                  Você ainda não enviou capturas para moderação. Participe de um torneio e registre seus troféus!
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab('submit')}
+                className="px-6 py-2.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-md"
+              >
+                Enviar Primeira Captura
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {userCatches.map((c) => (
+                <div
+                  key={c.id}
+                  className="bg-[#121316] border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4 hover:border-slate-700 transition flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-bold uppercase text-slate-400 truncate max-w-[160px]">
+                        {c.tournamentTitle}
+                      </span>
+                      <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                        c.status === 'approved'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : c.status === 'rejected'
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      }`}>
+                        {c.status === 'approved' ? '✓ Aprovado' : c.status === 'rejected' ? '✕ Rejeitado' : '⏳ Em Análise'}
+                      </span>
+                    </div>
+
+                    <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
+                      <img 
+                        src={c.photoUrl} 
+                        alt={c.species} 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{c.species}</h4>
+                        <p className="text-[10px] text-slate-400 font-mono">{c.location}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-base font-black font-mono text-[#00c853]">{c.length} cm</span>
+                        {c.teamName && (
+                          <span className="text-[9px] text-slate-400 font-mono block">Equipe: {c.teamName}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {c.moderatorNotes && (
+                    <div className="p-2.5 bg-slate-900 rounded-xl text-[11px] text-slate-300 font-mono border border-slate-800">
+                      <strong>Nota da Arbitragem:</strong> {c.moderatorNotes}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

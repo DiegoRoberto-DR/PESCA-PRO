@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck } from 'lucide-react';
-import { Tournament, UserProfile } from '../types';
-import { validateAndConsumeTournamentCode } from '../utils/dbHelpers';
+import React, { useState, useEffect } from 'react';
+import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck, Users } from 'lucide-react';
+import { Tournament, UserProfile, Team } from '../types';
+import { validateAndConsumeTournamentCode, getUserTeam } from '../utils/dbHelpers';
 
 interface ParticipateModalProps {
   isOpen: boolean;
@@ -24,8 +24,25 @@ export default function ParticipateModal({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [userTeam, setUserTeam] = useState<Team | null>(null);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && currentUser && tournament && tournament.teamFormat && tournament.teamFormat !== 'solo') {
+      setIsLoadingTeam(true);
+      getUserTeam(currentUser.uid).then(t => {
+        setUserTeam(t);
+        setIsLoadingTeam(false);
+      }).catch(() => {
+        setIsLoadingTeam(false);
+      });
+    }
+  }, [isOpen, currentUser, tournament]);
 
   if (!isOpen || !tournament) return null;
+
+  const isTeamTournament = tournament.teamFormat && tournament.teamFormat !== 'solo';
+  const requiredSpots = tournament.teamFormat === 'dupla' ? 2 : tournament.teamFormat === 'trio' ? 3 : 4;
 
   // Format WhatsApp message link
   const organizerWhatsAppNumber = '5519987626991'; // WhatsApp 19987626991
@@ -43,6 +60,38 @@ export default function ParticipateModal({
     if (!currentUser) {
       onRequireAuth();
       return;
+    }
+
+    // Check team requirements for team-based tournaments
+    if (isTeamTournament) {
+      const currentTeam = userTeam || await getUserTeam(currentUser.uid);
+      if (!currentTeam) {
+        setError(
+          `👥 EXIGÊNCIA DE EQUIPE: Este campeonato é no formato ${tournament.teamFormat?.toUpperCase()} (${requiredSpots} pessoas). É obrigatório criar ou juntar-se a uma equipe no seu Perfil antes de se inscrever.`
+        );
+        return;
+      }
+
+      // Check team status (must be approved by admin)
+      if (currentTeam.status !== 'approved') {
+        const statusMsg = currentTeam.status === 'rejected'
+          ? `reprovada pela moderação (${currentTeam.rejectionReason || 'Verifique com a organização'}).`
+          : 'aguardando aprovação do Administrador no painel de moderação.';
+        setError(
+          `🛑 EQUIPE NÃO HOMOLOGADA: Sua equipe "${currentTeam.name}" está ${statusMsg} Somente equipes aprovadas pelo Administrador podem participar.`
+        );
+        return;
+      }
+
+      // Check all vacancies are filled
+      const memberCount = currentTeam.members?.length || 0;
+      const expectedCapacity = currentTeam.maxMembers || requiredSpots;
+      if (memberCount < expectedCapacity) {
+        setError(
+          `⚠️ EQUIPE INCOMPLETA: Sua equipe "${currentTeam.name}" possui ${memberCount} de ${expectedCapacity} vagas preenchidas. Para participar deste campeonato, todas as ${expectedCapacity} vagas devem estar preenchidas antes.`
+        );
+        return;
+      }
     }
 
     const cleanCode = code.trim().toUpperCase();
@@ -109,11 +158,62 @@ export default function ParticipateModal({
         </div>
 
         {/* Tournament name badge */}
-        <div className="mb-5 px-3.5 py-2.5 bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-          <span className="text-slate-300 font-semibold truncate max-w-[240px]">{tournament.title}</span>
-          <span className="font-mono font-bold text-emerald-400">
-            {tournament.entryFeeType === 'pago' ? `R$ ${tournament.entryFeeAmount || 0}` : 'Inscrição Grátis'}
-          </span>
+        <div className="mb-5 px-3.5 py-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-300 font-semibold truncate max-w-[240px]">{tournament.title}</span>
+            <span className="font-mono font-bold text-emerald-400">
+              {tournament.entryFeeType === 'pago' ? `R$ ${tournament.entryFeeAmount || 0}` : 'Inscrição Grátis'}
+            </span>
+          </div>
+
+          {isTeamTournament && (
+            <div className="pt-2 border-t border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] text-amber-300 font-mono">
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" />
+                  <span>Formato: {tournament.teamFormat?.toUpperCase()} ({requiredSpots} Integrantes)</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold">Equipe Obrigatória</span>
+              </div>
+
+              {/* User's Team Status Indicator */}
+              {currentUser && (
+                <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-[11px]">
+                  {isLoadingTeam ? (
+                    <span className="text-slate-500">Verificando equipe...</span>
+                  ) : userTeam ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300 font-bold flex items-center gap-1.5">
+                          {userTeam.logoUrl ? (
+                            <img src={userTeam.logoUrl} alt="" className="h-4 w-4 rounded-full object-cover" />
+                          ) : '👥'}
+                          <span>{userTeam.name}</span>
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                          userTeam.status === 'approved'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : userTeam.status === 'rejected'
+                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {userTeam.status === 'approved' ? '✓ Aprovada' : userTeam.status === 'rejected' ? '✕ Reprovada' : '⏳ Em Aprovação'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                        <span>Vagas: {userTeam.members?.length || 0}/{userTeam.maxMembers || requiredSpots}</span>
+                        <span className={(userTeam.members?.length || 0) >= (userTeam.maxMembers || requiredSpots) ? 'text-emerald-400' : 'text-amber-400'}>
+                          {(userTeam.members?.length || 0) >= (userTeam.maxMembers || requiredSpots) ? '✓ Equipe Completa' : '⚠️ Vagas Pendentes'}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-rose-400">⚠️ Você ainda não possui equipe cadastrada.</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Success Alert */}

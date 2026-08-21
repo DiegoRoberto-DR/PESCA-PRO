@@ -15,8 +15,8 @@ import {
   Plus,
   Key
 } from 'lucide-react';
-import { Tournament, Catch, UserProfile } from '../types';
-import { submitCatch } from '../utils/dbHelpers';
+import { Tournament, Catch, UserProfile, Team } from '../types';
+import { submitCatch, subscribeUserTeam } from '../utils/dbHelpers';
 
 interface SubmitCatchFormProps {
   tournaments: Tournament[];
@@ -48,6 +48,18 @@ export default function SubmitCatchForm({
   const [location, setLocation] = useState<string>('');
   const [photoBase64, setPhotoBase64] = useState<string>('');
   const [photoError, setPhotoError] = useState<string>('');
+  const [userTeam, setUserTeam] = useState<Team | null>(null);
+
+  // Subscribe to user team
+  React.useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsub = subscribeUserTeam(currentUser.uid, (team) => {
+      setUserTeam(team);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, [currentUser?.uid]);
 
   // AI Validation variables
   const [isVerifyingAI, setIsVerifyingAI] = useState<boolean>(false);
@@ -215,6 +227,28 @@ export default function SubmitCatchForm({
       return;
     }
 
+    // Team validation
+    const isTeamTournament = currentTournament?.teamFormat && currentTournament.teamFormat !== 'solo';
+    if (isTeamTournament) {
+      if (!userTeam) {
+        setFormError(`Este campeonato é no formato ${currentTournament?.teamFormat.toUpperCase()}. Você precisa criar ou entrar em uma equipe no seu Perfil antes de enviar capturas.`);
+        return;
+      }
+      if (userTeam.status !== 'approved') {
+        const msg = userTeam.status === 'rejected'
+          ? `Sua equipe "${userTeam.name}" foi reprovada pela moderação (${userTeam.rejectionReason || 'Verifique com a organização'}).`
+          : `Sua equipe "${userTeam.name}" está aguardando aprovação do Administrador. Apenas equipes homologadas podem enviar capturas.`;
+        setFormError(msg);
+        return;
+      }
+      const teamCapacity = userTeam.maxMembers || 2;
+      const memberCount = userTeam.members ? userTeam.members.length : 0;
+      if (memberCount < teamCapacity) {
+        setFormError(`Sua equipe precisa estar COMPLETA (${memberCount}/${teamCapacity} membros) para enviar capturas. Compartilhe o código "${userTeam.code}" com seus parceiros.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -225,6 +259,9 @@ export default function SubmitCatchForm({
         userId: currentUser.uid,
         userName: currentUser.displayName,
         userEmail: currentUser.email,
+        teamId: userTeam?.id,
+        teamName: userTeam?.name,
+        teamLogo: userTeam?.logoUrl,
         species: species.trim(),
         length: parseFloat(length),
         weight: weight ? parseFloat(weight) : undefined,
