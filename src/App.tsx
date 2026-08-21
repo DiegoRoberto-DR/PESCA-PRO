@@ -13,22 +13,31 @@ import {
   Ruler, 
   Scale, 
   HelpCircle,
-  AlertTriangle
+  AlertTriangle,
+  Home,
+  Crown,
+  User,
+  ArrowRight,
+  LogIn
 } from 'lucide-react';
 import NavBar from './components/NavBar';
 import TournamentCard from './components/TournamentCard';
 import Leaderboard from './components/Leaderboard';
 import CatchFeed from './components/CatchFeed';
+import ChampionsView from './components/ChampionsView';
+import ProfileView from './components/ProfileView';
 import SubmitCatchForm from './components/SubmitCatchForm';
 import AdminPanel from './components/AdminPanel';
 import AuthModal from './components/AuthModal';
+import ParticipateModal from './components/ParticipateModal';
 import { Tournament, Catch, UserProfile } from './types';
 import { seedTournamentsIfNeeded, subscribeTournaments, subscribeCatches } from './utils/dbHelpers';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('tournaments');
+  const [currentTab, setCurrentTab] = useState<string>('home');
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [catches, setCatches] = useState<Catch[]>([]);
+  const [tournamentFilter, setTournamentFilter] = useState<'all' | 'active' | 'upcoming' | 'completed'>('all');
   
   // Active user profile state, persisted in local browser storage for smoothness
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -38,6 +47,8 @@ export default function App() {
 
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isSubmitCatchOpen, setIsSubmitCatchOpen] = useState<boolean>(false);
+  const [isParticipateModalOpen, setIsParticipateModalOpen] = useState<boolean>(false);
+  const [participateTournament, setParticipateTournament] = useState<Tournament | null>(null);
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
 
   // Seed and subscribe to collections on boot
@@ -51,7 +62,6 @@ export default function App() {
 
     // 2. Real-time Tournaments Subscription
     const unsubTournaments = subscribeTournaments((list) => {
-      // Sort tournaments: active first, then upcoming, then completed
       const sorted = [...list].sort((a, b) => {
         const order = { active: 0, upcoming: 1, completed: 2 };
         return order[a.status] - order[b.status];
@@ -73,21 +83,22 @@ export default function App() {
   const handleLogin = (profile: UserProfile) => {
     setCurrentUser(profile);
     localStorage.setItem('pesca_user', JSON.stringify(profile));
+    if (profile.role === 'admin' || profile.role === 'moderator') {
+      setCurrentTab('admin');
+    } else {
+      setCurrentTab('profile');
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('pesca_user');
-    setCurrentTab('tournaments');
+    setCurrentTab('home');
   };
 
   const handleParticipate = (tournament: Tournament) => {
-    if (!currentUser) {
-      setIsAuthModalOpen(true);
-      return;
-    }
-    setSelectedTournament(tournament);
-    setIsSubmitCatchOpen(true);
+    setParticipateTournament(tournament);
+    setIsParticipateModalOpen(true);
   };
 
   // Calculate high-level stats from Firestore
@@ -108,6 +119,14 @@ export default function App() {
   };
 
   const stats = getAppStats();
+  const activeTournaments = tournaments.filter(t => t.status === 'active');
+  const upcomingTournaments = tournaments.filter(t => t.status === 'upcoming');
+  const completedTournaments = tournaments.filter(t => t.status === 'completed');
+
+  const filteredTournaments = tournaments.filter(t => {
+    if (tournamentFilter === 'all') return true;
+    return t.status === tournamentFilter;
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-white">
@@ -121,82 +140,7 @@ export default function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
-        {/* Hero Section */}
-        {currentTab === 'tournaments' && !isSubmitCatchOpen && (
-          <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950/20 to-slate-900 border border-slate-800/80 p-8 sm:p-12 shadow-2xl flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
-            <div className="absolute top-0 right-0 -mr-16 -mt-16 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl z-0 pointer-events-none"></div>
-            <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl z-0 pointer-events-none"></div>
-
-            <div className="space-y-6 z-10 max-w-2xl">
-              <span className="inline-flex items-center space-x-1.5 py-1 px-3 bg-sky-500/10 text-sky-400 rounded-full text-xs font-semibold uppercase tracking-wider font-mono border border-sky-500/20">
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Arbitragem Automatizada com Inteligência Artificial</span>
-              </span>
-              
-              <h1 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight leading-none">
-                Campeonatos de <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">Pesca Esportiva</span> Online
-              </h1>
-              
-              <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-                Participe de qualquer represas, rio ou costa marítima do Brasil! Capture seu exemplar preferido, meça sobre uma régua rígida ao lado de um dispositivo móvel e envie a foto. Nossa IA Gemini e moderadores homologam os dados em tempo real no mural geral.
-              </p>
-
-              <div className="flex flex-wrap items-center gap-4 pt-2">
-                <button
-                  onClick={() => {
-                    if (!currentUser) {
-                      setIsAuthModalOpen(true);
-                    } else {
-                      setSelectedTournament(null);
-                      setIsSubmitCatchOpen(true);
-                    }
-                  }}
-                  className="bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-450 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm px-6 py-3 rounded-2xl shadow-lg shadow-sky-500/10 hover:shadow-sky-500/20 transition-all flex items-center space-x-2 cursor-pointer"
-                >
-                  <PlusCircle className="h-4.5 w-4.5" />
-                  <span>Enviar Nova Captura</span>
-                </button>
-                <a
-                  href="#how-it-works"
-                  className="bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs sm:text-sm px-5 py-3 rounded-2xl border border-slate-800 transition"
-                >
-                  Como Funciona?
-                </a>
-              </div>
-            </div>
-
-            {/* Quick Stats Grid Overlay */}
-            <div className="grid grid-cols-2 gap-4 lg:w-96 z-10">
-              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-850/80">
-                <Trophy className="h-5 w-5 text-amber-500 mb-2" />
-                <span className="text-[10px] uppercase font-mono text-slate-500">Torneios Ativos</span>
-                <p className="text-xl sm:text-2xl font-bold text-white mt-0.5">{stats.totalTournaments}</p>
-              </div>
-
-              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-850/80">
-                <Users className="h-5 w-5 text-sky-400 mb-2" />
-                <span className="text-[10px] uppercase font-mono text-slate-500">Pescadores Ativos</span>
-                <p className="text-xl sm:text-2xl font-bold text-white mt-0.5">{stats.totalFishermen > 0 ? stats.totalFishermen : 36}</p>
-              </div>
-
-              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-850/80">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500 mb-2" />
-                <span className="text-[10px] uppercase font-mono text-slate-500">Peixes Homologados</span>
-                <p className="text-xl sm:text-2xl font-bold text-white mt-0.5">{stats.totalCatches > 0 ? stats.totalCatches : 112}</p>
-              </div>
-
-              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-850/80">
-                <Ruler className="h-5 w-5 text-indigo-400 mb-2" />
-                <span className="text-[10px] uppercase font-mono text-slate-500">Maior Exemplar</span>
-                <p className="text-xl sm:text-2xl font-bold text-white mt-0.5">
-                  {stats.largestFish > 0 ? `${stats.largestFish} cm` : '82.5 cm'}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab Components Rendering */}
+        {/* Form to submit catch */}
         {isSubmitCatchOpen && currentUser ? (
           <SubmitCatchForm 
             tournaments={tournaments}
@@ -204,7 +148,7 @@ export default function App() {
             initialTournament={selectedTournament}
             onSuccess={() => {
               setIsSubmitCatchOpen(false);
-              setCurrentTab('feed'); // redirect to view uploads
+              setCurrentTab('profile'); // redirect to profile to see the new catch
             }}
             onCancel={() => {
               setIsSubmitCatchOpen(false);
@@ -212,22 +156,151 @@ export default function App() {
           />
         ) : (
           <div>
+            {/* 1. ABA INÍCIO (DESIGN MINIMALISTA E CINEMATOGRÁFICO CONFORME A IMAGEM) */}
+            {currentTab === 'home' && (
+              <div className="animate-fade-in flex flex-col justify-center items-center py-6 sm:py-10">
+                {/* Hero Box with Aerial Coastal Waves Background */}
+                <div className="relative w-full min-h-[68vh] sm:min-h-[75vh] rounded-3xl overflow-hidden flex flex-col items-center justify-center p-6 sm:p-12 md:p-16 text-center shadow-2xl border border-slate-800/60">
+                  {/* Aerial Drone Ocean Waves Image */}
+                  <div 
+                    className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0 transform scale-105"
+                    style={{
+                      backgroundImage: `url('https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2400&q=85')`
+                    }}
+                  />
+                  {/* Cinematic Dark Vignette & Gradient Overlays */}
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/45 to-black/90 z-0" />
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-transparent via-black/40 to-black/90 z-0 pointer-events-none" />
+
+                  {/* Centered Hero Content */}
+                  <div className="relative z-10 max-w-4xl mx-auto flex flex-col items-center space-y-6 sm:space-y-8">
+                    {/* Badge: TEMPORADA 2026 ABERTA */}
+                    <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-[#072417]/90 border border-[#00e676]/40 text-[#00e676] text-[11px] sm:text-xs font-black tracking-widest uppercase font-mono shadow-md">
+                      TEMPORADA 2026 ABERTA
+                    </div>
+
+                    {/* Main Title: ONDE OS GIGANTES SE ENCONTRAM */}
+                    <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-black text-white tracking-tight uppercase leading-[0.95] text-center drop-shadow-2xl">
+                      ONDE OS <span className="text-[#00e676]">GIGANTES</span><br />
+                      SE ENCONTRAM
+                    </h1>
+
+                    {/* Subtitle */}
+                    <p className="text-slate-200/90 text-sm sm:text-base md:text-lg max-w-2xl mx-auto text-center leading-relaxed font-medium drop-shadow-md">
+                      A primeira plataforma de campeonatos de pesca 100% online do Brasil. Sua pescaria de fim de semana agora vale troféus.
+                    </p>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-3 w-full sm:w-auto">
+                      <button
+                        onClick={() => setCurrentTab('tournaments')}
+                        className="w-full sm:w-auto px-8 py-4 bg-[#00c853] hover:bg-[#00e676] active:bg-[#00b048] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl shadow-2xl shadow-emerald-950/60 transition-all transform hover:-translate-y-0.5 cursor-pointer text-center"
+                      >
+                        EXPLORAR TORNEIOS
+                      </button>
+
+                      <button
+                        onClick={() => setCurrentTab('ranking')}
+                        className="w-full sm:w-auto px-8 py-4 bg-[#12141a]/80 hover:bg-[#1a1d26] text-white font-bold text-xs sm:text-sm uppercase tracking-wider rounded-2xl border border-slate-700/80 backdrop-blur-md transition-all transform hover:-translate-y-0.5 cursor-pointer text-center"
+                      >
+                        VER RANKING
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. ABA TORNEIOS */}
             {currentTab === 'tournaments' && (
               <div className="space-y-8 animate-fade-in">
-                {/* Intro subtitle */}
-                <div className="pb-4 border-b border-slate-800">
-                  <h2 className="text-xl sm:text-2xl font-extrabold text-white">Campeonatos de Pesca Ativos</h2>
-                  <p className="text-slate-400 text-xs sm:text-sm mt-0.5">Participe diretamente enviando seus registros fotográficos.</p>
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-slate-800">
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-extrabold text-white">Torneios de Pesca Esportiva</h2>
+                    <p className="text-slate-400 text-xs sm:text-sm mt-0.5">
+                      Confira os campeonatos que estão acontecendo, os próximos que vão acontecer e o histórico dos encerrados.
+                    </p>
+                  </div>
+
+                  {/* Filter Pills for Status */}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setTournamentFilter('all')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        tournamentFilter === 'all'
+                          ? 'bg-slate-100 text-slate-900 shadow'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <span>Todos</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-slate-300">
+                        {tournaments.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setTournamentFilter('active')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        tournamentFilter === 'active'
+                          ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>Acontecendo Agora</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-emerald-300">
+                        {activeTournaments.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setTournamentFilter('upcoming')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        tournamentFilter === 'upcoming'
+                          ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <span className="h-2 w-2 rounded-full bg-sky-400"></span>
+                      <span>Vão Acontecer</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-sky-300">
+                        {upcomingTournaments.length}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setTournamentFilter('completed')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        tournamentFilter === 'completed'
+                          ? 'bg-slate-700 text-white shadow'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <span>Encerrados</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-slate-300">
+                        {completedTournaments.length}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Tournaments Grid */}
                 {tournaments.length === 0 ? (
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
-                    Buscando campeonatos no banco de dados Firestore...
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
+                    Buscando torneios cadastrados no Firestore...
+                  </div>
+                ) : filteredTournaments.length === 0 ? (
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
+                    <p className="text-sm text-slate-400">Nenhum torneio encontrado com o filtro selecionado.</p>
+                    <button
+                      onClick={() => setTournamentFilter('all')}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition cursor-pointer"
+                    >
+                      Ver Todos os Torneios
+                    </button>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-                    {tournaments.map((t) => (
+                    {filteredTournaments.map((t) => (
                       <TournamentCard 
                         key={t.id} 
                         tournament={t} 
@@ -237,79 +310,149 @@ export default function App() {
                     ))}
                   </div>
                 )}
-
-                {/* Rules Section (How it works index) */}
-                <section id="how-it-works" className="bg-slate-900/40 border border-slate-800 p-6 sm:p-8 rounded-2xl space-y-6">
-                  <div className="flex items-center space-x-2.5 pb-4 border-b border-slate-800/80">
-                    <HelpCircle className="h-6 w-6 text-sky-400" />
-                    <h3 className="text-lg font-bold text-white">Como Funciona a Pesca Esportiva Online?</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm text-slate-350">
-                    <div className="space-y-2">
-                      <div className="h-8 w-8 rounded-lg bg-sky-500/10 text-sky-400 font-bold flex items-center justify-center font-mono">1</div>
-                      <h4 className="font-bold text-white">Escolha um Campeonato</h4>
-                      <p className="leading-relaxed text-xs">
-                        Veja as espécies válidas e regras de medição de cada arena disponível. Cada torneio possui regras rígidas de manuseio e premiações ecológicas fantásticas.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="h-8 w-8 rounded-lg bg-sky-500/10 text-sky-400 font-bold flex items-center justify-center font-mono">2</div>
-                      <h4 className="font-bold text-white">Capture e Meça no Local</h4>
-                      <p className="leading-relaxed text-xs">
-                        Coloque o peixe deitado sobre uma fita ou régua métrica rígida homologada. Tire uma foto nítida mostrando a régua visível de ponta a ponta e o focinho no ponto zero.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="h-8 w-8 rounded-lg bg-sky-500/10 text-sky-400 font-bold flex items-center justify-center font-mono">3</div>
-                      <h4 className="font-bold text-white">Envie a Foto e Aguarde</h4>
-                      <p className="leading-relaxed text-xs">
-                        Envie os dados. Nossa IA Gemini fará uma análise anatômica de espécie e escala para validar o peixe antes dos moderadores aprovarem o cálculo no painel oficial do ranking.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-slate-800/60 flex items-start space-x-2 text-amber-400 text-xs font-mono">
-                    <AlertTriangle className="h-4.5 w-4.5 shrink-0 mt-0.5" />
-                    <span><strong>Nota sobre Preservação:</strong> Incentivamos exclusivamente o pesque-e-solte. Peixes exibindo de forma clara maus tratos ou retidos mortos serão desqualificados no feedback de moderação técnica.</span>
-                  </div>
-                </section>
               </div>
             )}
 
-            {currentTab === 'feed' && (
-              <CatchFeed 
-                catches={catches}
-                currentUser={currentUser}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
-              />
+            {/* 3. ABA RANKING */}
+            {currentTab === 'ranking' && (
+              <div className="animate-fade-in">
+                <Leaderboard 
+                  tournaments={tournaments}
+                  catches={catches}
+                />
+              </div>
             )}
 
-            {currentTab === 'leaderboard' && (
-              <Leaderboard 
-                tournaments={tournaments}
-                catches={catches}
-              />
+            {/* 4. ABA CAMPEÕES */}
+            {currentTab === 'champions' && (
+              <div className="animate-fade-in">
+                <ChampionsView 
+                  tournaments={tournaments}
+                  catches={catches}
+                  onSelectTournament={(t) => {
+                    setSelectedTournament(t);
+                    setCurrentTab('ranking');
+                  }}
+                />
+              </div>
             )}
 
-            {currentTab === 'admin' && currentUser?.role === 'admin' && (
-              <AdminPanel catches={catches} />
+            {/* 5. ABA MEU PERFIL (Apenas para Pescadores Participantes; Admins vão para AdminPanel) */}
+            {currentTab === 'profile' && currentUser && (
+              currentUser.role === 'admin' || currentUser.role === 'moderator' ? (
+                <AdminPanel 
+                  catches={catches} 
+                  tournaments={tournaments}
+                  currentUser={currentUser}
+                />
+              ) : (
+                <div className="animate-fade-in">
+                  <ProfileView 
+                    currentUser={currentUser}
+                    catches={catches}
+                    tournaments={tournaments}
+                    selectedTournament={selectedTournament}
+                    onNavigateToTournaments={() => setCurrentTab('tournaments')}
+                    onOpenSubmitCatch={() => {
+                      setSelectedTournament(null);
+                      setIsSubmitCatchOpen(true);
+                    }}
+                    onLogout={handleLogout}
+                  />
+                </div>
+              )
+            )}
+
+            {/* ABA ADMIN (Exclusiva para Administradores e Moderadores) */}
+            {currentTab === 'admin' && (
+              (currentUser?.role === 'admin' || currentUser?.role === 'moderator') ? (
+                <AdminPanel 
+                  catches={catches} 
+                  tournaments={tournaments}
+                  currentUser={currentUser}
+                />
+              ) : (
+                <div className="max-w-md mx-auto my-12 bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-6 shadow-2xl animate-fade-in">
+                  <div className="inline-flex p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-400">
+                    <ShieldAlert className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Acesso à Central de Administração</h3>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      Esta área é restrita para o Administrador Geral e Moderadores credenciados.
+                    </p>
+                  </div>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const form = e.currentTarget;
+                      const pwd = (form.elements.namedItem('adminPassword') as HTMLInputElement)?.value;
+                      if (pwd === '121713#3') {
+                        const adminUser: UserProfile = {
+                          uid: 'admin_master_root',
+                          displayName: 'Administrador Geral',
+                          fullName: 'Coordenador Geral da Pesca',
+                          email: 'admin@pescaesporte.com',
+                          role: 'admin',
+                          permissions: {
+                            canModerateCatches: true,
+                            canManageTournaments: true,
+                            canManageFishermen: true,
+                            canManageAntifraud: true
+                          },
+                          status: 'active',
+                          createdAt: new Date().toISOString()
+                        };
+                        handleLogin(adminUser);
+                      } else {
+                        alert('Senha incorreta! Utilize a senha de coordenador 121713#3');
+                      }
+                    }}
+                    className="space-y-4 text-left"
+                  >
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">Senha de Acesso do Administrador</label>
+                      <input
+                        type="password"
+                        name="adminPassword"
+                        placeholder="Digite a senha (121713#3)"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 text-slate-200 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-mono focus:outline-none"
+                        autoFocus
+                      />
+                      <span className="text-[9px] text-slate-500 font-mono">Usuário: <strong className="text-amber-400">Admin</strong> | Senha: <strong className="text-amber-400">121713#3</strong></span>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-extrabold text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer"
+                    >
+                      Acessar Painel de Controle Completo
+                    </button>
+                  </form>
+                </div>
+              )
             )}
           </div>
         )}
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900 border-t border-slate-800 py-6 text-center text-xs text-slate-500 font-mono mt-12 bg-opacity-70">
-        <div className="max-w-7xl mx-auto px-4 space-y-2.5">
-          <p>© 2026 PescaEsporte Arena. Todos os direitos reservados para conservação e pesca esportiva esportiva nacional.</p>
-          <div className="flex justify-center space-x-4">
-            <span className="text-slate-600">Serviço de IA Gemini Ativo</span>
-            <span>•</span>
-            <span className="text-slate-600">Nuvem Firestore ID Integrada</span>
+      <footer className="bg-[#0b0c0e] border-t border-slate-900/90 py-6 text-xs text-slate-500 font-mono mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 bg-[#00c853] rounded-lg text-slate-950">
+              <Anchor className="h-4 w-4 stroke-[2.5]" />
+            </div>
+            <div className="text-left">
+              <span className="text-xs font-black tracking-tight text-white block">FISGADA PRO</span>
+              <span className="text-[9px] text-[#00c853] font-bold block">UMA EMPRESA DO GRUPO DR</span>
+            </div>
           </div>
+          
+          <p className="text-[10px] uppercase font-bold tracking-wider text-slate-500 text-center md:text-right">
+            © 2026 FISGADA PRO - TODOS OS DIREITOS RESERVADOS
+          </p>
         </div>
       </footer>
 
@@ -320,6 +463,33 @@ export default function App() {
           onLogin={handleLogin}
         />
       )}
+
+      {/* Participate in Tournament Dialog */}
+      <ParticipateModal
+        isOpen={isParticipateModalOpen}
+        onClose={() => setIsParticipateModalOpen(false)}
+        tournament={participateTournament}
+        currentUser={currentUser}
+        onRequireAuth={() => {
+          setIsParticipateModalOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        onSuccessEnroll={(t) => {
+          if (currentUser) {
+            const currentList = currentUser.enrolledTournaments || [];
+            if (!currentList.includes(t.id)) {
+              const updatedUser: UserProfile = {
+                ...currentUser,
+                enrolledTournaments: [...currentList, t.id]
+              };
+              setCurrentUser(updatedUser);
+              localStorage.setItem('pesca_user', JSON.stringify(updatedUser));
+            }
+          }
+          setSelectedTournament(t);
+          setCurrentTab('profile');
+        }}
+      />
     </div>
   );
 }

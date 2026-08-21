@@ -123,15 +123,6 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             </div>
           </div>
 
-          {/* Anti-fraud Verification Keyword */}
-          <div className="flex items-center gap-1.5 text-[10px] bg-amber-500/5 px-2.5 py-1.5 rounded-xl border border-amber-500/10 font-mono">
-            <Key className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-            <span className="text-slate-450 uppercase text-[9px]">Chave Antifraude:</span>
-            <span className="font-extrabold text-amber-400 tracking-wider uppercase bg-amber-500/10 px-1.5 py-0.5 rounded">
-              {tournament.keyword || 'PESCA2026'}
-            </span>
-          </div>
-
           {/* Info grid */}
           <div className="grid grid-cols-2 gap-3 border-y border-slate-800 py-3.5 text-xs">
             <div className="flex items-center space-x-2 text-slate-400">
@@ -172,18 +163,16 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
         {/* Action Button */}
         <div className="mt-6 pt-2">
           {tournament.status === 'completed' ? (
-            <button
-              disabled
-              className="w-full bg-slate-800 text-slate-500 font-semibold text-sm py-2.5 px-4 rounded-xl cursor-not-allowed border border-slate-700/50 text-center"
-            >
+            <div className="w-full bg-slate-800/60 text-slate-500 font-semibold text-xs py-2.5 px-4 rounded-xl border border-slate-800 text-center">
               Campeonato Encerrado
-            </button>
+            </div>
           ) : (
             <button
               onClick={() => onParticipate(tournament)}
-              className="w-full bg-slate-800 hover:bg-sky-500 hover:text-white text-slate-200 font-semibold text-xs sm:text-sm py-2.5 px-4 rounded-xl border border-slate-700 hover:border-sky-400 transition-all shadow-md active:scale-[0.98] cursor-pointer text-center"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl shadow-lg shadow-emerald-950/40 hover:shadow-emerald-900/60 transition-all active:scale-[0.98] cursor-pointer text-center flex items-center justify-center gap-1.5"
             >
-              {tournament.status === 'upcoming' ? 'Pré-Inscrição Disponível' : 'Enviar Captura do Peixe'}
+              <Trophy className="h-4 w-4" />
+              <span>Participar</span>
             </button>
           )}
         </div>

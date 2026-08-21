@@ -1,5 +1,5 @@
 import React from 'react';
-import { Anchor, Trophy, Award, Navigation, LogIn, LogOut, ShieldAlert, User, Compass } from 'lucide-react';
+import { Anchor, Trophy, Award, Home, Crown, User, LogIn, ShieldCheck, RefreshCw } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface NavBarProps {
@@ -18,155 +18,254 @@ export default function NavBar({
   onLogout 
 }: NavBarProps) {
   return (
-    <header id="app-header" className="sticky top-0 z-40 w-full bg-slate-900 border-b border-slate-800 backdrop-blur-md bg-opacity-95 shadow-sm">
+    <header id="app-header" className="sticky top-0 z-40 w-full bg-[#0d0e11] border-b border-slate-800/80 backdrop-blur-md shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setCurrentTab('tournaments')}>
-            <div className="p-2.5 bg-gradient-to-tr from-sky-400 to-indigo-500 rounded-xl text-white shadow-md shadow-sky-500/10">
-              <Anchor className="h-6 w-6 stroke-[2.3]" />
-            </div>
-            <div>
-              <span className="text-xl font-bold tracking-tight text-white bg-clip-text">
-                Pesca<span className="text-sky-400">Esporte</span>
+        <div className="flex items-center justify-between h-16 sm:h-20">
+          
+          {/* Logo & Cloud Status */}
+          <div className="flex items-center space-x-3">
+            <div 
+              className="flex items-center space-x-2.5 cursor-pointer" 
+              onClick={() => setCurrentTab('home')}
+            >
+              <div className="p-2 bg-[#00c853] rounded-xl text-slate-950 shadow-md">
+                <Anchor className="h-5 w-5 stroke-[2.5]" />
+              </div>
+              <span className="text-xl font-black tracking-tight text-white flex items-center gap-1">
+                FISGADA <span className="text-[#00c853]">PRO</span>
               </span>
-              <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">Arena de Torneios</p>
+            </div>
+
+            {/* Nuvem Ativa badge */}
+            <div className="hidden sm:flex items-center gap-1.5 ml-2">
+              <button 
+                onClick={() => window.location.reload()}
+                className="text-slate-500 hover:text-slate-300 transition p-1 cursor-pointer"
+                title="Sincronizar"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-[10px] font-bold tracking-wider uppercase px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-400 flex items-center gap-1.5 font-mono">
+                <span className="h-2 w-2 rounded-full bg-[#00c853] animate-pulse"></span>
+                NUVEM ATIVA
+              </span>
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="hidden md:flex space-x-1" aria-label="Negação principal">
+          {/* Main Navigation Menu */}
+          <nav className="hidden lg:flex items-center space-x-1" aria-label="Navegação principal">
+            {/* 1. Início */}
+            <button
+              id="tab-home"
+              onClick={() => setCurrentTab('home')}
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                currentTab === 'home'
+                  ? 'text-[#00c853]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Home className="h-3.5 w-3.5" />
+              <span>INÍCIO</span>
+            </button>
+
+            {/* 2. Torneios */}
             <button
               id="tab-tournaments"
               onClick={() => setCurrentTab('tournaments')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                 currentTab === 'tournaments'
-                  ? 'bg-sky-500/10 text-sky-400 font-semibold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  ? 'text-[#00c853]'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Trophy className="h-4 w-4" />
-              <span>Campeonatos</span>
+              <Trophy className="h-3.5 w-3.5" />
+              <span>TORNEIOS</span>
             </button>
 
+            {/* 3. Ranking */}
             <button
-              id="tab-feed"
-              onClick={() => setCurrentTab('feed')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                currentTab === 'feed'
-                  ? 'bg-sky-500/10 text-sky-400 font-semibold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              id="tab-ranking"
+              onClick={() => setCurrentTab('ranking')}
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                currentTab === 'ranking'
+                  ? 'text-[#00c853]'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Compass className="h-4 w-4" />
-              <span>Mural de Capturas</span>
+              <Award className="h-3.5 w-3.5" />
+              <span>RANKING</span>
             </button>
 
+            {/* 4. Campeões */}
             <button
-              id="tab-leaderboard"
-              onClick={() => setCurrentTab('leaderboard')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                currentTab === 'leaderboard'
-                  ? 'bg-sky-500/10 text-sky-400 font-semibold'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+              id="tab-champions"
+              onClick={() => setCurrentTab('champions')}
+              className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                currentTab === 'champions'
+                  ? 'text-[#00c853]'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Award className="h-4 w-4" />
-              <span>Placar de Líderes</span>
+              <Crown className="h-3.5 w-3.5" />
+              <span>CAMPEÕES</span>
             </button>
 
-            {user?.role === 'admin' && (
+            {/* Admin / Moderador tab */}
+            {(user?.role === 'admin' || user?.role === 'moderator') && (
               <button
                 id="tab-admin"
                 onClick={() => setCurrentTab('admin')}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all border border-dashed ${
+                className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
                   currentTab === 'admin'
-                    ? 'bg-amber-500/10 border-amber-500/45 text-amber-400 font-semibold'
-                    : 'border-slate-800 text-amber-300/80 hover:text-amber-300 hover:bg-slate-800/50'
+                    ? 'text-amber-400 font-extrabold bg-amber-500/10 border border-amber-500/30'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <ShieldAlert className="h-4 w-4" />
-                <span>Moderação (Admin)</span>
+                <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
+                <span>ADMIN</span>
+              </button>
+            )}
+
+            {/* 5. Meu Perfil (Apenas para Participantes Pescadores) */}
+            {user && user.role === 'participant' && (
+              <button
+                id="tab-profile"
+                onClick={() => setCurrentTab('profile')}
+                className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  currentTab === 'profile'
+                    ? 'text-[#00c853]'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <User className="h-3.5 w-3.5" />
+                <span>MEU PERFIL</span>
               </button>
             )}
           </nav>
 
-          {/* User Section */}
-          <div className="flex items-center space-x-4">
+          {/* User Profile Summary / Login Button */}
+          <div className="flex items-center space-x-3">
             {user ? (
-              <div className="flex items-center space-x-3 bg-slate-800/60 py-1.5 pl-3 pr-2 rounded-full border border-slate-800">
-                <div className="flex flex-col text-right">
-                  <span className="text-xs font-semibold text-slate-200">{user.displayName}</span>
-                  <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider">
-                    {user.role === 'admin' ? 'Coordenador/IA' : 'Pescador'}
-                  </span>
-                </div>
-                
-                <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-sky-400 to-indigo-500 flex items-center justify-center text-white font-semibold text-sm">
-                  {user.displayName.charAt(0).toUpperCase()}
+              <div className="flex items-center space-x-3">
+                <div 
+                  className="flex items-center gap-2 cursor-pointer"
+                  onClick={() => {
+                    if (user.role === 'admin' || user.role === 'moderator') {
+                      setCurrentTab('admin');
+                    } else {
+                      setCurrentTab('profile');
+                    }
+                  }}
+                  title={user.role === 'admin' ? 'Painel do Administrador Geral' : user.role === 'moderator' ? 'Painel de Moderação' : 'Ver Meu Perfil'}
+                >
+                  <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-white font-bold text-xs overflow-hidden ${
+                    user.role === 'admin' 
+                      ? 'border-amber-500/80 bg-amber-500/20 text-amber-300' 
+                      : user.role === 'moderator'
+                      ? 'border-sky-500/80 bg-sky-500/20 text-sky-300'
+                      : 'border-emerald-500/50 bg-[#1a1c20]'
+                  }`}>
+                    {user.photoURL ? (
+                      <img src={user.photoURL} alt={user.displayName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    ) : (
+                      user.displayName.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="flex flex-col text-left">
+                    <span className="text-xs font-black uppercase tracking-wide text-white hover:text-[#00c853] transition">
+                      {user.displayName}
+                    </span>
+                    {(user.role === 'admin' || user.role === 'moderator') && (
+                      <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                        {user.role === 'admin' ? 'Super Admin' : 'Moderador'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <button
                   onClick={onLogout}
-                  title="Sair do perfil"
-                  className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-full transition"
+                  title="Sair da conta"
+                  className="text-xs font-bold text-slate-400 hover:text-rose-400 uppercase tracking-wider transition cursor-pointer px-1 py-0.5"
                 >
-                  <LogOut className="h-4 w-4" />
+                  SAIR
                 </button>
               </div>
             ) : (
               <button
                 id="btn-login"
                 onClick={onOpenAuthModal}
-                className="flex items-center space-x-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-medium text-xs sm:text-sm px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl shadow-lg shadow-sky-500/15 hover:shadow-sky-500/25 transition-all text-center"
+                className="flex items-center space-x-2 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs uppercase tracking-wider px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-950/40 transition-all text-center cursor-pointer"
               >
                 <LogIn className="h-4 w-4" />
-                <span>Entrar / Participar</span>
+                <span>ENTRAR</span>
               </button>
             )}
           </div>
         </div>
 
         {/* Mobile Navigation Bar */}
-        <div className="flex md:hidden border-t border-slate-800/80 py-2 justify-around">
+        <div className="flex lg:hidden border-t border-slate-800/80 py-2 justify-around">
           <button
-            onClick={() => setCurrentTab('tournaments')}
-            className={`flex flex-col items-center py-1 px-3 rounded text-[10px] font-medium transition ${
-              currentTab === 'tournaments' ? 'text-sky-400' : 'text-slate-400'
+            onClick={() => setCurrentTab('home')}
+            className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+              currentTab === 'home' ? 'text-[#00c853]' : 'text-slate-400'
             }`}
           >
-            <Trophy className="h-5 w-5 mb-0.5" />
-            <span>Campeonatos</span>
+            <Home className="h-4 w-4 mb-0.5" />
+            <span>Início</span>
           </button>
           
           <button
-            onClick={() => setCurrentTab('feed')}
-            className={`flex flex-col items-center py-1 px-3 rounded text-[10px] font-medium transition ${
-              currentTab === 'feed' ? 'text-sky-400' : 'text-slate-400'
+            onClick={() => setCurrentTab('tournaments')}
+            className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+              currentTab === 'tournaments' ? 'text-[#00c853]' : 'text-slate-400'
             }`}
           >
-            <Compass className="h-5 w-5 mb-0.5" />
-            <span>Capturas</span>
+            <Trophy className="h-4 w-4 mb-0.5" />
+            <span>Torneios</span>
           </button>
 
           <button
-            onClick={() => setCurrentTab('leaderboard')}
-            className={`flex flex-col items-center py-1 px-3 rounded text-[10px] font-medium transition ${
-              currentTab === 'leaderboard' ? 'text-sky-400' : 'text-slate-400'
+            onClick={() => setCurrentTab('ranking')}
+            className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+              currentTab === 'ranking' ? 'text-[#00c853]' : 'text-slate-400'
             }`}
           >
-            <Award className="h-5 w-5 mb-0.5" />
-            <span>Líderes</span>
+            <Award className="h-4 w-4 mb-0.5" />
+            <span>Ranking</span>
           </button>
 
-          {user?.role === 'admin' && (
+          <button
+            onClick={() => setCurrentTab('champions')}
+            className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+              currentTab === 'champions' ? 'text-[#00c853]' : 'text-slate-400'
+            }`}
+          >
+            <Crown className="h-4 w-4 mb-0.5" />
+            <span>Campeões</span>
+          </button>
+
+          {user && user.role === 'participant' && (
             <button
-              onClick={() => setCurrentTab('admin')}
-              className={`flex flex-col items-center py-1 px-3 rounded text-[10px] font-medium transition ${
-                currentTab === 'admin' ? 'text-amber-400' : 'text-slate-400'
+              onClick={() => setCurrentTab('profile')}
+              className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+                currentTab === 'profile' ? 'text-[#00c853]' : 'text-slate-400'
               }`}
             >
-              <ShieldAlert className="h-5 w-5 mb-0.5" />
+              <User className="h-4 w-4 mb-0.5" />
+              <span>Perfil</span>
+            </button>
+          )}
+
+          {(user?.role === 'admin' || user?.role === 'moderator') && (
+            <button
+              onClick={() => setCurrentTab('admin')}
+              className={`flex flex-col items-center py-1 px-2 rounded text-[10px] font-bold uppercase transition ${
+                currentTab === 'admin' ? 'text-amber-400 font-bold' : 'text-amber-400/70'
+              }`}
+            >
+              <ShieldCheck className="h-4 w-4 mb-0.5" />
               <span>Admin</span>
             </button>
           )}
