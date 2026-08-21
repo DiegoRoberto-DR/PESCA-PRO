@@ -16,7 +16,29 @@ import {
   where
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember } from '../types';
+import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification } from '../types';
+
+// Helper to remove any undefined fields before sending to Firestore (prevents Firebase Unsupported undefined errors)
+export function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
+  if (!obj || typeof obj !== 'object') return obj;
+  const cleaned: any = Array.isArray(obj) ? [] : {};
+  
+  Object.keys(obj).forEach((key) => {
+    const val = obj[key];
+    if (val !== undefined) {
+      if (Array.isArray(val)) {
+        cleaned[key] = val.map((item: any) => 
+          typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item
+        );
+      } else if (typeof val === 'object' && val !== null && !(val instanceof Date) && !('_methodName' in val)) {
+        cleaned[key] = cleanFirestoreData(val);
+      } else {
+        cleaned[key] = val;
+      }
+    }
+  });
+  return cleaned;
+}
 
 // Seed Initial Tournaments to Firestore if database is empty
 export async function seedTournamentsIfNeeded(): Promise<Tournament[]> {
@@ -141,10 +163,13 @@ export async function seedTournamentsIfNeeded(): Promise<Tournament[]> {
 
 // Add a new tournament helper
 export async function createTournament(tournamentData: Omit<Tournament, 'id' | 'participantCount'>): Promise<string> {
-  const docRef = await addDoc(collection(db, 'tournaments'), {
+  const cleanedPayload = cleanFirestoreData({
     ...tournamentData,
-    participantCount: 0
+    participantCount: 0,
+    createdAt: serverTimestamp()
   });
+
+  const docRef = await addDoc(collection(db, 'tournaments'), cleanedPayload);
 
   // If a tournamentCode was generated on creation, automatically add it as the first active entry in tournament_codes
   if (tournamentData.tournamentCode) {
@@ -154,10 +179,36 @@ export async function createTournament(tournamentData: Omit<Tournament, 'id' | '
         tournamentId: docRef.id,
         tournamentTitle: tournamentData.title,
         isUsed: false,
+        paymentStatus: 'paid',
+        createdBy: 'admin',
         createdAt: serverTimestamp()
       });
     } catch (e) {
       console.warn("Aviso ao salvar código do torneio:", e);
+    }
+  }
+
+  // If initial capture windows were added, create official notifications
+  if (tournamentData.captureWindows && tournamentData.captureWindows.length > 0) {
+    try {
+      for (const win of tournamentData.captureWindows) {
+        const notifData: Omit<AppNotification, 'id'> = {
+          tournamentId: docRef.id,
+          tournamentTitle: tournamentData.title,
+          title: `Nova Janela de Captura: ${tournamentData.title}`,
+          message: `Uma nova janela de captura / etapa foi agendada para ${win.date} das ${win.startTime || '06:00'} às ${win.endTime || '18:00'}.${win.secret ? ` Chave antifraude: ${win.secret}` : ''}`,
+          type: 'capture_window',
+          windowDate: win.date,
+          windowStartTime: win.startTime || '06:00',
+          windowEndTime: win.endTime || '18:00',
+          windowSecret: win.secret,
+          readBy: [],
+          createdAt: serverTimestamp()
+        };
+        await addDoc(collection(db, 'notifications'), cleanFirestoreData(notifData));
+      }
+    } catch (notifErr) {
+      console.warn("Aviso ao criar notificações iniciais de janelas de captura:", notifErr);
     }
   }
 
@@ -265,8 +316,125 @@ export async function updateCatchStatus(
 
 // Update a tournament
 export async function updateTournament(tournamentId: string, data: Partial<Tournament>): Promise<void> {
+  const cleanedData = cleanFirestoreData(data);
   const docRef = doc(db, 'tournaments', tournamentId);
-  await updateDoc(docRef, data);
+  await updateDoc(docRef, cleanedData);
+}
+
+// Add a new capture window to an existing tournament and notify participants
+export async function addCaptureWindowToTournament(
+  tournamentId: string,
+  tournamentTitle: string,
+  windowData: Omit<CaptureWindow, 'id'>
+): Promise<CaptureWindow> {
+  const tourDocRef = doc(db, 'tournaments', tournamentId);
+  const tourSnap = await getDoc(tourDocRef);
+  if (!tourSnap.exists()) {
+    throw new Error('Campeonato não encontrado.');
+  }
+
+  const tourData = tourSnap.data() as Tournament;
+  if (tourData.status === 'completed') {
+    throw new Error('Não é possível adicionar janelas de captura a um campeonato já finalizado.');
+  }
+
+  const newWindowId = `win_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const newWindow: CaptureWindow = {
+    id: newWindowId,
+    name: windowData.name || `Etapa de ${windowData.date}`,
+    date: windowData.date,
+    startTime: windowData.startTime || '06:00',
+    endTime: windowData.endTime || '18:00',
+    secret: windowData.secret || tourData.keyword || 'PESCA2026',
+    description: windowData.description || '',
+    createdAt: new Date().toISOString()
+  };
+
+  const existingWindows: CaptureWindow[] = tourData.captureWindows || [];
+  const updatedWindows = [...existingWindows, newWindow];
+
+  // Sort windows by date and time
+  updatedWindows.sort((a, b) => {
+    const timeA = `${a.date}T${a.startTime || '00:00'}`;
+    const timeB = `${b.date}T${b.startTime || '00:00'}`;
+    return timeA.localeCompare(timeB);
+  });
+
+  await updateDoc(tourDocRef, {
+    captureWindows: updatedWindows
+  });
+
+  // Create Broadcast Notification for all tournament participants
+  try {
+    const notifData: Omit<AppNotification, 'id'> = {
+      tournamentId,
+      tournamentTitle: tourData.title || tournamentTitle,
+      title: `Nova Janela de Captura: ${tourData.title || tournamentTitle}`,
+      message: `Uma nova etapa/janela de captura foi agendada para o dia ${newWindow.date} das ${newWindow.startTime} às ${newWindow.endTime}.${newWindow.secret ? ` Chave antifraude: ${newWindow.secret}` : ''}`,
+      type: 'capture_window',
+      windowDate: newWindow.date,
+      windowStartTime: newWindow.startTime,
+      windowEndTime: newWindow.endTime,
+      windowSecret: newWindow.secret,
+      readBy: [],
+      createdAt: serverTimestamp()
+    };
+    await addDoc(collection(db, 'notifications'), cleanFirestoreData(notifData));
+  } catch (notifErr) {
+    console.warn("Aviso ao disparar notificação da nova janela de captura:", notifErr);
+  }
+
+  return newWindow;
+}
+
+// Remove a capture window from tournament
+export async function removeCaptureWindowFromTournament(
+  tournamentId: string,
+  windowId: string
+): Promise<void> {
+  const tourDocRef = doc(db, 'tournaments', tournamentId);
+  const tourSnap = await getDoc(tourDocRef);
+  if (!tourSnap.exists()) {
+    throw new Error('Campeonato não encontrado.');
+  }
+
+  const tourData = tourSnap.data() as Tournament;
+  if (tourData.status === 'completed') {
+    throw new Error('Não é possível alterar janelas de um campeonato já finalizado.');
+  }
+
+  const existingWindows: CaptureWindow[] = tourData.captureWindows || [];
+  const updatedWindows = existingWindows.filter(w => w.id !== windowId);
+
+  await updateDoc(tourDocRef, {
+    captureWindows: updatedWindows
+  });
+}
+
+// Subscribe to real-time notifications for tournaments
+export function subscribeNotifications(callback: (notifications: AppNotification[]) => void) {
+  const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const list: AppNotification[] = [];
+    snapshot.forEach((docSnap) => {
+      list.push({ id: docSnap.id, ...docSnap.data() } as AppNotification);
+    });
+    callback(list);
+  }, (error) => {
+    console.error("Erro ao assinar notificações:", error);
+  });
+}
+
+// Mark notification as read for a user
+export async function markNotificationAsRead(notifId: string, userId: string): Promise<void> {
+  try {
+    const docRef = doc(db, 'notifications', notifId);
+    await updateDoc(docRef, {
+      readBy: arrayUnion(userId)
+    });
+  } catch (err) {
+    console.warn("Erro ao marcar notificação como lida:", err);
+  }
 }
 
 // Delete a tournament
@@ -796,6 +964,28 @@ export async function validateAndConsumeTournamentCode(
       // Enroll user into tournament
       await enrollUserInTournament(user.uid, tournamentId);
 
+      // If user belongs to a team, sync tournament to entire team and enroll all members
+      try {
+        const userTeam = await getUserTeam(user.uid);
+        if (userTeam) {
+          const updatedTourneys = Array.from(new Set([...(userTeam.tournamentIds || []), tournamentId]));
+          await updateDoc(doc(db, 'teams', userTeam.id), {
+            tournamentIds: updatedTourneys
+          });
+
+          // Automatically enroll all existing teammates into this tournament
+          if (userTeam.members && userTeam.members.length > 0) {
+            for (const member of userTeam.members) {
+              if (member.userId && member.userId !== user.uid) {
+                await enrollUserInTournament(member.userId, tournamentId);
+              }
+            }
+          }
+        }
+      } catch (teamSyncErr) {
+        console.warn("Aviso ao sincronizar torneio com equipe:", teamSyncErr);
+      }
+
       return {
         success: true,
         message: 'Código de inscrição autenticado com sucesso! Inscrição confirmada no torneio.',
@@ -844,6 +1034,26 @@ export async function validateAndConsumeTournamentCode(
 
         // Enroll user into tournament
         await enrollUserInTournament(user.uid, tournamentId);
+
+        // Sync with team
+        try {
+          const userTeam = await getUserTeam(user.uid);
+          if (userTeam) {
+            const updatedTourneys = Array.from(new Set([...(userTeam.tournamentIds || []), tournamentId]));
+            await updateDoc(doc(db, 'teams', userTeam.id), {
+              tournamentIds: updatedTourneys
+            });
+            if (userTeam.members && userTeam.members.length > 0) {
+              for (const member of userTeam.members) {
+                if (member.userId && member.userId !== user.uid) {
+                  await enrollUserInTournament(member.userId, tournamentId);
+                }
+              }
+            }
+          }
+        } catch (teamSyncErr) {
+          console.warn("Aviso ao sincronizar torneio com equipe:", teamSyncErr);
+        }
 
         return {
           success: true,
@@ -1102,7 +1312,7 @@ export async function joinTeamByCode(
       tournamentIds: updatedTournamentIds
     });
 
-    // Update user doc
+    // Update user doc & enroll in all team tournaments
     try {
       const userRef = doc(db, 'users', user.uid);
       await updateDoc(userRef, {
@@ -1110,8 +1320,15 @@ export async function joinTeamByCode(
         teamName: team.name,
         teamLogo: team.logoUrl || ''
       });
+
+      // Automatically enroll into all tournaments that the team/captain already paid and signed up for
+      if (updatedTournamentIds && updatedTournamentIds.length > 0) {
+        for (const tourneyId of updatedTournamentIds) {
+          await enrollUserInTournament(user.uid, tourneyId);
+        }
+      }
     } catch (e) {
-      console.warn("Aviso ao atualizar perfil do usuário ao entrar na equipe:", e);
+      console.warn("Aviso ao atualizar perfil e inscrições do usuário ao entrar na equipe:", e);
     }
 
     const updatedTeamObj: Team = {

@@ -42,14 +42,18 @@ export default function ParticipateModal({
   if (!isOpen || !tournament) return null;
 
   const isTeamTournament = tournament.teamFormat && tournament.teamFormat !== 'solo';
-  const requiredSpots = tournament.teamFormat === 'dupla' ? 2 : tournament.teamFormat === 'trio' ? 3 : 4;
+  const requiredSpots = tournament.teamFormat === 'dupla' ? 2 : tournament.teamFormat === 'trio' ? 3 : tournament.teamFormat === 'quarteto' ? 4 : 5;
+  const isAlreadyEnrolled = Boolean(
+    currentUser?.enrolledTournaments?.includes(tournament.id) ||
+    (userTeam && userTeam.tournamentIds?.includes(tournament.id))
+  );
 
   // Format WhatsApp message link
   const organizerWhatsAppNumber = '5519987626991'; // WhatsApp 19987626991
   const messageText = encodeURIComponent(
     `Olá! Gostaria de receber meu código exclusivo de participação para o torneio "${tournament.title}". (Taxa: ${
       tournament.entryFeeType === 'pago' ? `R$ ${tournament.entryFeeAmount || 0}` : 'Grátis'
-    })`
+    }${isTeamTournament ? ` - Equipe de ${requiredSpots} pessoas, pagamento único` : ''})`
   );
   const whatsappUrl = `https://wa.me/${organizerWhatsAppNumber}?text=${messageText}`;
 
@@ -67,7 +71,15 @@ export default function ParticipateModal({
       const currentTeam = userTeam || await getUserTeam(currentUser.uid);
       if (!currentTeam) {
         setError(
-          `👥 EXIGÊNCIA DE EQUIPE: Este campeonato é no formato ${tournament.teamFormat?.toUpperCase()} (${requiredSpots} pessoas). É obrigatório criar ou juntar-se a uma equipe no seu Perfil antes de se inscrever.`
+          `👥 EXIGÊNCIA DE EQUIPE: Este campeonato é no formato ${tournament.teamFormat?.toUpperCase()} (${requiredSpots} pessoas). É obrigatório criar ou juntar-se a uma equipe de ${requiredSpots} pessoas no seu Perfil antes de se inscrever.`
+        );
+        return;
+      }
+
+      // Check team capacity matches tournament requirement
+      if (currentTeam.maxMembers !== requiredSpots) {
+        setError(
+          `⚠️ FORMATO INCOMPATÍVEL: Este campeonato exige uma equipe de ${requiredSpots} pessoas (${tournament.teamFormat?.toUpperCase()}), mas sua equipe "${currentTeam.name}" possui capacidade configurada para ${currentTeam.maxMembers} pessoas. Crie ou entre em uma equipe com capacidade de ${requiredSpots} pessoas.`
         );
         return;
       }
@@ -85,10 +97,9 @@ export default function ParticipateModal({
 
       // Check all vacancies are filled
       const memberCount = currentTeam.members?.length || 0;
-      const expectedCapacity = currentTeam.maxMembers || requiredSpots;
-      if (memberCount < expectedCapacity) {
+      if (memberCount < requiredSpots) {
         setError(
-          `⚠️ EQUIPE INCOMPLETA: Sua equipe "${currentTeam.name}" possui ${memberCount} de ${expectedCapacity} vagas preenchidas. Para participar deste campeonato, todas as ${expectedCapacity} vagas devem estar preenchidas antes.`
+          `⚠️ EQUIPE INCOMPLETA: Sua equipe "${currentTeam.name}" possui ${memberCount} de ${requiredSpots} vagas preenchidas. Para participar deste campeonato, todas as ${requiredSpots} vagas devem estar preenchidas antes.`
         );
         return;
       }
@@ -223,10 +234,37 @@ export default function ParticipateModal({
               <CheckCircle2 className="h-10 w-10" />
             </div>
             <h3 className="text-base font-bold text-white uppercase">INSCRIÇÃO CONFIRMADA!</h3>
-            <p className="text-xs text-slate-400">Código autenticado e de uso único registrado. Você já pode enviar suas capturas neste campeonato.</p>
+            <p className="text-xs text-slate-400">Código autenticado e de uso único registrado. Você e sua equipe já estão habilitados a enviar capturas neste campeonato.</p>
+          </div>
+        ) : isAlreadyEnrolled ? (
+          <div className="py-6 text-center space-y-4 animate-fade-in bg-slate-900/60 p-6 rounded-2xl border border-emerald-500/30">
+            <div className="inline-flex p-3 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <CheckCircle2 className="h-8 w-8" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white uppercase">VOCÊ JÁ ESTÁ INSCRITO!</h3>
+              <p className="text-xs text-slate-300">
+                {isTeamTournament 
+                  ? `Sua equipe "${userTeam?.name || 'sua equipe'}" já está oficialmente inscrita neste campeonato (taxa paga e ativada pelo Capitão). Todos os membros da equipe já podem enviar capturas!`
+                  : 'Sua inscrição neste torneio já foi autenticada e está ativa.'}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm py-3 px-4 rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              OK, ENTENDIDO
+            </button>
           </div>
         ) : (
           <form onSubmit={handleConfirm} className="space-y-5">
+            {/* Team Single Payment Explanatory Box */}
+            {isTeamTournament && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[11px] text-amber-200/90 leading-relaxed">
+                💡 <strong>Pagamento Único por Equipe:</strong> Em torneios de {tournament.teamFormat?.toUpperCase()} ({requiredSpots} pessoas), o valor é pago por uma <strong>única pessoa (o Capitão)</strong>. O Capitão ativa o código aqui e compartilha o Código da Equipe (EQP-...) com os demais parceiros para entrarem na equipe sem novo pagamento!
+              </div>
+            )}
+
             {/* Error message */}
             {error && (
               <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs flex items-start gap-2.5 leading-relaxed">

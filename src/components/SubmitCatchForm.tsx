@@ -230,8 +230,14 @@ export default function SubmitCatchForm({
     // Team validation
     const isTeamTournament = currentTournament?.teamFormat && currentTournament.teamFormat !== 'solo';
     if (isTeamTournament) {
+      const requiredSpots = currentTournament?.teamFormat === 'dupla' ? 2 : currentTournament?.teamFormat === 'trio' ? 3 : currentTournament?.teamFormat === 'quarteto' ? 4 : 5;
+      
       if (!userTeam) {
-        setFormError(`Este campeonato é no formato ${currentTournament?.teamFormat.toUpperCase()}. Você precisa criar ou entrar em uma equipe no seu Perfil antes de enviar capturas.`);
+        setFormError(`Este campeonato é no formato ${currentTournament?.teamFormat.toUpperCase()} (${requiredSpots} pessoas). Você precisa criar ou entrar em uma equipe no seu Perfil antes de enviar capturas.`);
+        return;
+      }
+      if (userTeam.maxMembers !== requiredSpots) {
+        setFormError(`Este campeonato exige uma equipe de ${requiredSpots} pessoas (${currentTournament?.teamFormat.toUpperCase()}), mas sua equipe "${userTeam.name}" tem capacidade para ${userTeam.maxMembers} pessoas.`);
         return;
       }
       if (userTeam.status !== 'approved') {
@@ -241,10 +247,9 @@ export default function SubmitCatchForm({
         setFormError(msg);
         return;
       }
-      const teamCapacity = userTeam.maxMembers || 2;
       const memberCount = userTeam.members ? userTeam.members.length : 0;
-      if (memberCount < teamCapacity) {
-        setFormError(`Sua equipe precisa estar COMPLETA (${memberCount}/${teamCapacity} membros) para enviar capturas. Compartilhe o código "${userTeam.code}" com seus parceiros.`);
+      if (memberCount < requiredSpots) {
+        setFormError(`Sua equipe precisa estar COMPLETA (${memberCount}/${requiredSpots} membros) para enviar capturas. Compartilhe o código "${userTeam.code}" com seus parceiros para preencher todas as vagas.`);
         return;
       }
     }

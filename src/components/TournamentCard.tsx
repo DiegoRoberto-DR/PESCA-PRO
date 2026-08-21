@@ -114,10 +114,11 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             <div className="flex items-center space-x-1.5 text-slate-400 bg-slate-950/40 p-1.5 rounded-lg border border-slate-800/40">
               <Users className="h-3.5 w-3.5 text-sky-400 shrink-0" />
               <span>Formato: <strong className="text-slate-200 capitalize font-bold">
-                {tournament.teamFormat === 'solo' && 'Solo'}
-                {tournament.teamFormat === 'dupla' && 'Dupla'}
-                {tournament.teamFormat === 'trio' && 'Equipe de 3'}
-                {tournament.teamFormat === 'quarteto' && 'Equipe de 4'}
+                {tournament.teamFormat === 'solo' && 'Solo (1 Pessoa)'}
+                {tournament.teamFormat === 'dupla' && 'Dupla (2 Pessoas)'}
+                {tournament.teamFormat === 'trio' && 'Trio (3 Pessoas)'}
+                {tournament.teamFormat === 'quarteto' && 'Quarteto (4 Pessoas)'}
+                {tournament.teamFormat === 'quinteto' && 'Quinteto (5 Pessoas)'}
                 {!tournament.teamFormat && 'Solo'}
               </strong></span>
             </div>

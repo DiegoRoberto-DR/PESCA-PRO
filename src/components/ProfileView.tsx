@@ -32,9 +32,12 @@ import {
   Image as ImageIcon,
   Shield,
   HelpCircle,
-  Share2
+  Share2,
+  Bell,
+  Calendar,
+  Radio
 } from 'lucide-react';
-import { UserProfile, Catch, Tournament, TournamentCode, Team } from '../types';
+import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification } from '../types';
 import { 
   submitCatch, 
   subscribeUserTournamentCodes, 
@@ -44,7 +47,9 @@ import {
   joinTeamByCode,
   removeMemberFromTeam,
   leaveTeam,
-  updateTeam
+  updateTeam,
+  subscribeNotifications,
+  markNotificationAsRead
 } from '../utils/dbHelpers';
 
 interface ProfileViewProps {
@@ -66,7 +71,11 @@ export default function ProfileView({
   onLogout
 }: ProfileViewProps) {
   // Navigation tabs in profile
-  const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'submit' | 'catches'>('registration');
+  const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'windows' | 'submit' | 'catches'>('registration');
+
+  // Notifications State
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [copiedWindowSecretId, setCopiedWindowSecretId] = useState<string | null>(null);
 
   // Realtime codes assigned to this user
   const [userCodes, setUserCodes] = useState<TournamentCode[]>([]);
@@ -110,6 +119,16 @@ export default function ProfileView({
     };
   }, [currentUser?.uid]);
 
+  // Subscribe to broadcast notifications in real time
+  useEffect(() => {
+    const unsubscribe = subscribeNotifications((allNotifs) => {
+      setNotifications(allNotifs);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
   // Filter catches for current user
   const userCatches = catches.filter(
     c => c.userId === currentUser.uid || c.userEmail === currentUser.email
@@ -134,6 +153,58 @@ export default function ProfileView({
     const hasCatchInTournament = userCatches.some(c => c.tournamentId === t.id);
     return Boolean(isEnrolled || hasCatchInTournament);
   });
+
+  // Filter notifications relevant to user's enrolled tournaments or general
+  const userTourneyIds = (currentUser.enrolledTournaments || []).concat(participatingTournaments.map(t => t.id));
+  const relevantNotifications = notifications.filter(n => {
+    if (!n.tournamentId) return true;
+    return userTourneyIds.includes(n.tournamentId);
+  });
+  const unreadNotifsCount = relevantNotifications.filter(n => !n.isRead && (!n.readBy || !n.readBy.includes(currentUser.uid))).length;
+
+  // All capture windows across user's enrolled tournaments
+  const userCaptureWindows: (CaptureWindow & { tournamentId: string; tournamentTitle: string; tournamentStatus: string })[] = [];
+  participatingTournaments.forEach(tourney => {
+    if (tourney.captureWindows && tourney.captureWindows.length > 0) {
+      tourney.captureWindows.forEach(cw => {
+        userCaptureWindows.push({
+          ...cw,
+          tournamentId: tourney.id,
+          tournamentTitle: tourney.title,
+          tournamentStatus: tourney.status
+        });
+      });
+    }
+  });
+
+  // Helper to determine capture window status relative to now
+  const getCaptureWindowStatus = (win: CaptureWindow) => {
+    if (!win.date) return { status: 'scheduled', label: 'Agendada', badgeClass: 'bg-slate-800 text-slate-400 border-slate-700' };
+    try {
+      const now = new Date();
+      const [year, month, day] = win.date.split('-').map(Number);
+      const [startH, startM] = (win.startTime || '00:00').split(':').map(Number);
+      const [endH, endM] = (win.endTime || '23:59').split(':').map(Number);
+
+      const startDate = new Date(year, month - 1, day, startH, startM, 0);
+      const endDate = new Date(year, month - 1, day, endH, endM, 59);
+
+      if (now < startDate) {
+        return { status: 'upcoming', label: 'Em Breve', badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30' };
+      } else if (now >= startDate && now <= endDate) {
+        return { status: 'active', label: 'Janela Aberta Agora', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse' };
+      } else {
+        return { status: 'ended', label: 'Encerrada', badgeClass: 'bg-slate-800/80 text-slate-500 border-slate-800' };
+      }
+    } catch {
+      return { status: 'scheduled', label: 'Agendada', badgeClass: 'bg-slate-800 text-slate-400 border-slate-700' };
+    }
+  };
+
+  const handleMarkNotificationRead = async (notifId: string) => {
+    await markNotificationAsRead(notifId, currentUser.uid);
+    setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, isRead: true, readBy: [...(n.readBy || []), currentUser.uid] } : n));
+  };
 
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(() => {
     if (selectedTournament && participatingTournaments.some(t => t.id === selectedTournament.id)) {
@@ -528,6 +599,24 @@ export default function ProfileView({
             )}
           </button>
 
+          {/* New Tab: Janelas de Captura & Avisos */}
+          <button
+            onClick={() => setActiveTab('windows')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+              activeTab === 'windows'
+                ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Clock className="h-4 w-4" />
+            <span>Janelas & Avisos</span>
+            {unreadNotifsCount > 0 && (
+              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-rose-500 text-white animate-pulse">
+                {unreadNotifsCount}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={() => setActiveTab('submit')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
@@ -553,6 +642,36 @@ export default function ProfileView({
           </button>
         </div>
       </div>
+
+      {/* FLASH NOTIFICATION BANNER (if there are unread notifications or open capture windows) */}
+      {unreadNotifsCount > 0 && activeTab !== 'windows' && (
+        <div className="bg-gradient-to-r from-amber-500/20 via-slate-900 to-amber-500/20 border border-amber-500/40 rounded-3xl p-4 sm:p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/20 rounded-2xl text-amber-400 border border-amber-500/30 animate-bounce shrink-0">
+              <Bell className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white uppercase tracking-tight flex items-center gap-2">
+                <span>Novas Janelas de Captura & Avisos Oficiais</span>
+                <span className="bg-rose-500 text-white text-[10px] font-mono px-2 py-0.2 rounded-full font-bold">
+                  {unreadNotifsCount} {unreadNotifsCount === 1 ? 'aviso novo' : 'avisos novos'}
+                </span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                {relevantNotifications[0]?.title}: {relevantNotifications[0]?.message}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setActiveTab('windows')}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer shadow-lg shrink-0 flex items-center gap-1.5"
+          >
+            <Clock className="h-4 w-4" />
+            <span>Ver Fases & Horários</span>
+          </button>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: MEU CADASTRO & DADOS PESSOAIS */}
@@ -1306,6 +1425,233 @@ export default function ProfileView({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: JANELAS DE CAPTURA & AVISOS OFICIAIS */}
+      {/* ========================================================================= */}
+      {activeTab === 'windows' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Card */}
+          <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-400 border border-amber-500/20">
+                  <Clock className="h-7 w-7" />
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
+                    Fases & Janelas de Captura
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Acompanhe em tempo real os dias, horários oficiais e palavras-chave de cada etapa dos seus campeonatos.
+                  </p>
+                </div>
+              </div>
+
+              {unreadNotifsCount > 0 && (
+                <span className="px-3.5 py-1.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-bold rounded-xl flex items-center gap-1.5 self-start sm:self-auto">
+                  <Bell className="h-3.5 w-3.5 text-rose-400 animate-bounce" />
+                  <span>{unreadNotifsCount} {unreadNotifsCount === 1 ? 'Novo Aviso' : 'Novos Avisos'}</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Scheduled Capture Windows */}
+            <div className="lg:col-span-8 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-emerald-400" />
+                  <span>Cronograma de Fases ({userCaptureWindows.length})</span>
+                </h3>
+              </div>
+
+              {userCaptureWindows.length === 0 ? (
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-xl">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+                    <Clock className="h-7 w-7" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white">Nenhuma Janela Específica Cadastrada</h4>
+                    <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                      Os campeonatos em que você está inscrito seguem a janela geral de vigência do torneio, ou a organização ainda irá publicar as etapas.
+                    </p>
+                  </div>
+                  {tournaments.length > 0 && (
+                    <div className="pt-2">
+                      <button
+                        onClick={() => setActiveTab('submit')}
+                        className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        Enviar Captura Geral
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {userCaptureWindows.map((win, idx) => {
+                    const statusInfo = getCaptureWindowStatus(win);
+                    return (
+                      <div
+                        key={win.id || idx}
+                        className="bg-[#121316] border border-slate-800 hover:border-slate-700 rounded-3xl p-5 sm:p-6 shadow-xl transition space-y-4"
+                      >
+                        {/* Top: Tournament Title & Status */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                          <div>
+                            <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider block">
+                              {win.tournamentTitle}
+                            </span>
+                            <h4 className="text-base font-black text-white uppercase tracking-tight">
+                              {win.name || `Etapa ${idx + 1}`}
+                            </h4>
+                          </div>
+
+                          <span className={`px-3 py-1 rounded-xl text-xs font-mono font-bold border self-start sm:self-auto ${statusInfo.badgeClass}`}>
+                            {statusInfo.label}
+                          </span>
+                        </div>
+
+                        {/* Middle: Details Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#181a1e] p-4 rounded-2xl border border-slate-800/80">
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-mono uppercase text-slate-500 block">Data da Etapa:</span>
+                            <div className="text-sm font-black text-white flex items-center gap-1.5 font-mono">
+                              <Calendar className="h-4 w-4 text-sky-400" />
+                              <span>{win.date ? win.date.split('-').reverse().join('/') : 'Data a definir'}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-mono uppercase text-slate-500 block">Horário de Captura:</span>
+                            <div className="text-sm font-black text-white flex items-center gap-1.5 font-mono">
+                              <Clock className="h-4 w-4 text-amber-400" />
+                              <span>{win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Antifraud Secret Code Box */}
+                        <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-mono font-bold uppercase text-amber-300">
+                              Chave Antifraude Obrigatória da Etapa:
+                            </span>
+                            <div className="text-lg font-mono font-black text-amber-400 tracking-widest">
+                              {win.secret}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(win.secret);
+                              setCopiedWindowSecretId(win.id || win.secret);
+                              setTimeout(() => setCopiedWindowSecretId(null), 2500);
+                            }}
+                            className="px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                          >
+                            {copiedWindowSecretId === (win.id || win.secret) ? (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                                <span>Copiada!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3.5 w-3.5" />
+                                <span>Copiar Chave</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {win.description && (
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
+                            📝 <strong>Observação:</strong> {win.description}
+                          </p>
+                        )}
+
+                        {/* Action: Jump to Submit Catch */}
+                        <div className="flex justify-end pt-1">
+                          <button
+                            onClick={() => {
+                              if (win.tournamentId) setSelectedTournamentId(win.tournamentId);
+                              setActiveTab('submit');
+                            }}
+                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                            <span>Enviar Captura Nesta Fase</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Notification Feed (Avisos em Tempo Real) */}
+            <div className="lg:col-span-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-amber-400" />
+                  <span>Avisos & Notificações ({relevantNotifications.length})</span>
+                </h3>
+              </div>
+
+              {relevantNotifications.length === 0 ? (
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 text-center text-xs text-slate-500 shadow-xl space-y-2">
+                  <Bell className="h-6 w-6 mx-auto text-slate-600" />
+                  <p>Você não possui nenhum aviso no momento.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                  {relevantNotifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`p-4 rounded-2xl border transition space-y-2.5 ${
+                        notif.isRead
+                          ? 'bg-[#14161a] border-slate-800/80 text-slate-400'
+                          : 'bg-amber-500/10 border-amber-500/40 text-slate-200 shadow-lg'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${notif.isRead ? 'bg-slate-600' : 'bg-amber-400 animate-ping'}`} />
+                          <h4 className="text-xs font-bold text-white">{notif.title}</h4>
+                        </div>
+                        {notif.type === 'capture_window_added' && (
+                          <span className="text-[9px] font-mono uppercase bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
+                            Nova Etapa
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs leading-relaxed text-slate-300">
+                        {notif.message}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500 font-mono">
+                        <span>{notif.createdAt ? new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                        {!notif.isRead && (
+                          <button
+                            onClick={() => handleMarkNotificationRead(notif.id)}
+                            className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                          >
+                            Marcar como lida
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

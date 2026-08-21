@@ -65,7 +65,9 @@ import {
   generateUniqueTournamentCode,
   subscribeTeams,
   updateTeamStatus,
-  deleteTeamByAdmin
+  deleteTeamByAdmin,
+  addCaptureWindowToTournament,
+  removeCaptureWindowFromTournament
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
@@ -186,20 +188,33 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [prizeValue, setPrizeValue] = useState<string>('');
   const [entryFeeType, setEntryFeeType] = useState<'gratis' | 'pago'>('gratis');
   const [entryFeeAmount, setEntryFeeAmount] = useState<string>('');
-  const [teamFormat, setTeamFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto'>('solo');
+  const [teamFormat, setTeamFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'>('solo');
   const [keyword, setKeyword] = useState('TORNEIO2026');
   const [imageUrl, setImageUrl] = useState('');
   const [daysForRegistration, setDaysForRegistration] = useState<number>(7);
   const [maxParticipants, setMaxParticipants] = useState<number>(50);
   const [participationCode, setParticipationCode] = useState('');
   const [captureWindows, setCaptureWindows] = useState<CaptureWindow[]>([]);
+  const [newWindowName, setNewWindowName] = useState('');
   const [newWindowDate, setNewWindowDate] = useState('');
   const [newWindowSecret, setNewWindowSecret] = useState('');
-  const [newWindowStartTime, setNewWindowStartTime] = useState('');
-  const [newWindowEndTime, setNewWindowEndTime] = useState('');
+  const [newWindowStartTime, setNewWindowStartTime] = useState('06:00');
+  const [newWindowEndTime, setNewWindowEndTime] = useState('18:00');
   const [formSuccess, setFormSuccess] = useState('');
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Manage Capture Windows Modal State (for ongoing/active/upcoming tournaments)
+  const [managingWindowsTourney, setManagingWindowsTourney] = useState<Tournament | null>(null);
+  const [modalWinName, setModalWinName] = useState('');
+  const [modalWinDate, setModalWinDate] = useState('');
+  const [modalWinStartTime, setModalWinStartTime] = useState('06:00');
+  const [modalWinEndTime, setModalWinEndTime] = useState('18:00');
+  const [modalWinSecret, setModalWinSecret] = useState('');
+  const [modalWinDesc, setModalWinDesc] = useState('');
+  const [isAddingModalWin, setIsAddingModalWin] = useState(false);
+  const [modalWinError, setModalWinError] = useState('');
+  const [modalWinSuccess, setModalWinSuccess] = useState('');
 
   // Edit Tournament Form State
   const [editTitle, setEditTitle] = useState('');
@@ -212,7 +227,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editEndDate, setEditEndDate] = useState('');
   const [editFeeType, setEditFeeType] = useState<'gratis' | 'pago'>('gratis');
   const [editFeeAmount, setEditFeeAmount] = useState('');
-  const [editFormat, setEditFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto'>('solo');
+  const [editFormat, setEditFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'>('solo');
   const [editImage, setEditImage] = useState('');
 
   // Registered Users Management State
@@ -361,34 +376,113 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     showFlashMessage(`🔑 Código gerado: ${code}`, 'success');
   };
 
-  // Add capture window
+  // Generate a random antifraud keyword for capture window
+  const handleGenerateWindowSecret = () => {
+    const code = generateUniqueTournamentCode('ETAPA');
+    setNewWindowSecret(code);
+  };
+
+  // Add capture window in create tournament form
   const handleAddCaptureWindow = () => {
     if (!newWindowDate) {
       showFlashMessage('Selecione uma data para a janela de captura.', 'error');
       return;
     }
-    if (!newWindowSecret.trim()) {
-      showFlashMessage('Digite a palavra-chave/segredo para esta janela.', 'error');
-      return;
-    }
+    const secretFinal = newWindowSecret.trim().toUpperCase() || keyword.trim().toUpperCase() || 'TORNEIO2026';
     const newWin: CaptureWindow = {
-      id: 'win_' + Date.now(),
+      id: 'win_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      name: newWindowName.trim() || `Etapa ${newWindowDate}`,
       date: newWindowDate,
-      secret: newWindowSecret.trim().toUpperCase(),
+      secret: secretFinal,
       startTime: newWindowStartTime || '06:00',
       endTime: newWindowEndTime || '18:00'
     };
     setCaptureWindows(prev => [...prev, newWin]);
+    setNewWindowName('');
     setNewWindowDate('');
     setNewWindowSecret('');
-    setNewWindowStartTime('');
-    setNewWindowEndTime('');
-    showFlashMessage('Janela de captura adicionada com sucesso!', 'success');
+    setNewWindowStartTime('06:00');
+    setNewWindowEndTime('18:00');
+    showFlashMessage('Janela de captura adicionada à lista!', 'success');
   };
 
-  // Remove capture window
+  // Remove capture window in create form
   const handleRemoveCaptureWindow = (id: string) => {
     setCaptureWindows(prev => prev.filter(w => w.id !== id));
+  };
+
+  // Open modal to manage capture windows for an existing tournament (active or upcoming)
+  const handleOpenManageWindows = (t: Tournament) => {
+    setManagingWindowsTourney(t);
+    setModalWinName(`Etapa ${(t.captureWindows?.length || 0) + 1}`);
+    setModalWinDate(t.startDate || new Date().toISOString().split('T')[0]);
+    setModalWinStartTime('06:00');
+    setModalWinEndTime('18:00');
+    setModalWinSecret(generateUniqueTournamentCode('ETAPA'));
+    setModalWinDesc('');
+    setModalWinError('');
+    setModalWinSuccess('');
+  };
+
+  // Add capture window to an existing tournament and notify participants
+  const handleAddWindowToExistingTournament = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingWindowsTourney) return;
+    if (!modalWinDate) {
+      setModalWinError('Por favor, informe a data da etapa.');
+      return;
+    }
+    const secretFinal = modalWinSecret.trim().toUpperCase() || managingWindowsTourney.keyword || 'PESCA2026';
+
+    try {
+      setIsAddingModalWin(true);
+      setModalWinError('');
+      const newWin = await addCaptureWindowToTournament(
+        managingWindowsTourney.id,
+        managingWindowsTourney.title,
+        {
+          name: modalWinName.trim() || `Etapa de ${modalWinDate}`,
+          date: modalWinDate,
+          startTime: modalWinStartTime || '06:00',
+          endTime: modalWinEndTime || '18:00',
+          secret: secretFinal,
+          description: modalWinDesc.trim()
+        }
+      );
+
+      // Update local modal state immediately
+      setManagingWindowsTourney(prev => prev ? {
+        ...prev,
+        captureWindows: [...(prev.captureWindows || []), newWin]
+      } : null);
+
+      setModalWinSuccess(`✅ Janela de Captura "${newWin.name || 'Nova Etapa'}" publicada com sucesso! Uma notificação foi enviada em tempo real para os inscritos.`);
+      showFlashMessage('📅 Janela de captura adicionada e competidores notificados!', 'success');
+
+      // Reset fields
+      setModalWinName(`Etapa ${(managingWindowsTourney.captureWindows?.length || 0) + 2}`);
+      setModalWinSecret(generateUniqueTournamentCode('ETAPA'));
+      setModalWinDesc('');
+    } catch (err: any) {
+      setModalWinError(err.message || 'Erro ao adicionar janela de captura.');
+    } finally {
+      setIsAddingModalWin(false);
+    }
+  };
+
+  // Remove capture window from an existing tournament
+  const handleRemoveWindowFromExistingTournament = async (windowId: string) => {
+    if (!managingWindowsTourney) return;
+    try {
+      await removeCaptureWindowFromTournament(managingWindowsTourney.id, windowId);
+      setManagingWindowsTourney(prev => prev ? {
+        ...prev,
+        captureWindows: (prev.captureWindows || []).filter(w => w.id !== windowId)
+      } : null);
+      showFlashMessage('Janela de captura removida do campeonato.', 'success');
+    } catch (err: any) {
+      showFlashMessage('Erro ao remover janela: ' + err.message, 'error');
+    }
   };
 
   // Moderation: Approve Catch
@@ -585,18 +679,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       setFormError('Por favor, informe o título do campeonato.');
       return;
     }
-    if (!description.trim()) {
-      setFormError('Por favor, informe uma descrição detalhada do campeonato.');
-      return;
-    }
-    if (!keyword.trim()) {
-      setFormError('A palavra-chave antifraude é obrigatória.');
-      return;
-    }
-    if (!prize.trim()) {
-      setFormError('Descreva a premiação do campeonato.');
-      return;
-    }
+
+    const effectiveDescription = description.trim() || `Campeonato oficial ${title.trim()} de Pesca Esportiva.`;
+    const effectivePrize = prize.trim() || 'Troféu + Premiação Oficial aos Vencedores';
+    const effectiveKeyword = keyword.trim().toUpperCase() || 'TORNEIO2026';
 
     const statusLabel = status === 'active' ? '🟢 Ativo' : status === 'upcoming' ? '⏳ Em Breve' : '🏁 Encerrado';
 
@@ -616,9 +702,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
         const rules = rulesText.trim()
           ? rulesText.split('\n').map(r => r.trim()).filter(r => r.length > 0)
           : [
-              'Medição obrigatória em fita métrica homologada com a palavra-chave visível.',
-              'Prática estrita do pesque e solte. Exemplares abatidos serão desclassificados.',
-              'Envio da foto com boa iluminação e nitidez dos números da régua.'
+              'Medição obrigatória em fita métrica homologada com a palavra-chave/código da fase visível.',
+              'Prática estrita do pesque e solte. Exemplares abatidos serão desclassificados sumariamente.',
+              'Envio da foto com boa iluminação e nitidez dos números da régua.',
+              'Vídeo de soltura do peixe nadando com saúde em água aberta.'
             ];
 
         try {
@@ -627,19 +714,19 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
           await createTournament({
             title: title.trim(),
-            description: description.trim() || `Campeonato oficial ${title.trim()}`,
+            description: effectiveDescription,
             rules: rules,
-            startDate: startDate,
-            endDate: endDate,
+            startDate: startDate || new Date().toISOString().split('T')[0],
+            endDate: endDate || '2026-12-31',
             status: status,
             targetSpecies: species.length > 0 ? species : ['Tucunaré'],
             metric: metric,
-            prize: prize.trim(),
+            prize: effectivePrize,
             prizeValue: prizeValue ? Number(prizeValue) : undefined,
             entryFeeType: entryFeeType,
             entryFeeAmount: entryFeeType === 'pago' && entryFeeAmount ? Number(entryFeeAmount) : 0,
             teamFormat: teamFormat,
-            keyword: keyword.trim().toUpperCase(),
+            keyword: effectiveKeyword,
             imageUrl: effectiveBannerUrl,
             daysForRegistration: Number(daysForRegistration) || 7,
             maxParticipants: Number(maxParticipants) || 50,
@@ -664,7 +751,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setCaptureWindows([]);
           setActiveSection('tournaments');
         } catch (err: any) {
-          setFormError('Erro ao criar campeonato: ' + err.message);
+          setFormError('Erro ao criar campeonato: ' + (err.message || 'Erro inesperado'));
         } finally {
           setIsSubmitting(false);
         }
@@ -1494,6 +1581,17 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   </span>
 
                   <div className="flex items-center space-x-2">
+                    {t.status !== 'completed' && (
+                      <button
+                        onClick={() => handleOpenManageWindows(t)}
+                        className="px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        title="Gerenciar Janelas de Captura da Fase & Notificar Competidores"
+                      >
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>Janelas ({t.captureWindows?.length || 0})</span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => handleOpenEditTournament(t)}
                       className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
@@ -1549,35 +1647,108 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             {/* Row 1: Title & Team Format Dropdown */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  TÍTULO DO CAMPEONATO *
+                </label>
                 <input
                   type="text"
-                  placeholder="Título do Torneio"
+                  placeholder="Ex: Torneio Master Tucunaré 2026"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 font-semibold"
+                  required
                 />
               </div>
 
               <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  FORMATO DE DISPUTA / EQUIPE
+                </label>
                 <select
                   value={teamFormat}
                   onChange={(e: any) => setTeamFormat(e.target.value)}
                   className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition cursor-pointer"
                 >
-                  <option value="solo">Solo (1 Pessoa)</option>
-                  <option value="dupla">Dupla (2 Pessoas)</option>
-                  <option value="trio">Trio (3 Pessoas)</option>
-                  <option value="quarteto">Equipe (4 Pessoas)</option>
+                  <option value="solo">Individual / Solo (1 Pescador)</option>
+                  <option value="dupla">Dupla (2 Pescadores - Pago pelo Capitão)</option>
+                  <option value="trio">Trio (3 Pescadores - Pago pelo Capitão)</option>
+                  <option value="quarteto">Quarteto (4 Pescadores - Pago pelo Capitão)</option>
+                  <option value="quinteto">Quinteto (5 Pescadores - Pago pelo Capitão)</option>
                 </select>
               </div>
             </div>
 
-            {/* Row 2: Prize & Image URL */}
+            {/* Row: VALOR DO CAMPEONATO / INSCRIÇÃO & PREMIAÇÃO */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-[#181a1f]/60 p-4 rounded-2xl border border-slate-800">
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  TIPO DE INSCRIÇÃO
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setEntryFeeType('gratis'); setEntryFeeAmount(''); }}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      entryFeeType === 'gratis'
+                        ? 'bg-emerald-500 text-slate-950 shadow-md font-black'
+                        : 'bg-[#121316] text-slate-400 border border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    Grátis (R$ 0)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEntryFeeType('pago'); if (!entryFeeAmount) setEntryFeeAmount('50'); }}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                      entryFeeType === 'pago'
+                        ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                        : 'bg-[#121316] text-slate-400 border border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    Pago (R$)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  VALOR DA TAXA (R$) {entryFeeType === 'pago' ? '*' : '(Isento)'}
+                </label>
+                <input
+                  type="number"
+                  placeholder="0,00"
+                  disabled={entryFeeType === 'gratis'}
+                  value={entryFeeType === 'gratis' ? '' : entryFeeAmount}
+                  onChange={(e) => setEntryFeeAmount(e.target.value)}
+                  className={`w-full bg-[#121316] border border-slate-800 text-white rounded-xl px-4 py-2.5 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition ${
+                    entryFeeType === 'gratis' ? 'opacity-40 cursor-not-allowed' : 'text-amber-400 font-bold'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  VALOR ESTIMADO DO PRÊMIO (R$)
+                </label>
+                <input
+                  type="number"
+                  placeholder="Ex: 5000"
+                  value={prizeValue}
+                  onChange={(e) => setPrizeValue(e.target.value)}
+                  className="w-full bg-[#121316] border border-slate-800 text-emerald-400 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-mono font-bold focus:outline-none focus:border-[#00e676] transition"
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Prize Description & Antifraud Keyword */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  DESCRIÇÃO DA PREMIAÇÃO
+                </label>
                 <input
                   type="text"
-                  placeholder="Prêmio"
+                  placeholder="Ex: 1º Troféu + R$ 3.000 | 2º Troféu + R$ 1.500 | 3º R$ 500"
                   value={prize}
                   onChange={(e) => setPrize(e.target.value)}
                   className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
@@ -1585,20 +1756,87 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
 
               <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block flex items-center justify-between">
+                  <span>PALAVRA-CHAVE ANTIFRAUDE GERAL</span>
+                  <button
+                    type="button"
+                    onClick={() => setKeyword(generateUniqueTournamentCode('CHAVE'))}
+                    className="text-[#00e676] hover:underline cursor-pointer lowercase text-[10px]"
+                  >
+                    gerar chave
+                  </button>
+                </label>
                 <input
                   type="text"
-                  placeholder="URL da Imagem"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 font-mono"
+                  placeholder="Ex: TORNEIO2026"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value.toUpperCase())}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-amber-400 font-mono font-bold rounded-2xl px-4 py-3.5 text-xs sm:text-sm uppercase focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
                 />
               </div>
             </div>
 
-            {/* Banner Presets / Live Preview */}
+            {/* Row: DATES (START / END) & STATUS */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  DATA DE INÍCIO GERAL
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  DATA DE TÉRMINO GERAL
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                  STATUS INICIAL
+                </label>
+                <select
+                  value={status}
+                  onChange={(e: any) => setStatus(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition cursor-pointer"
+                >
+                  <option value="active">🟢 Ativo (Inscrições e Capturas Abertas)</option>
+                  <option value="upcoming">⏳ Em Breve (Divulgação / Pré-inscrição)</option>
+                  <option value="completed">🏁 Encerrado</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Row: REGRAS DO CAMPEONATO (MULTI-LINE) */}
+            <div>
+              <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block flex items-center justify-between">
+                <span>REGRAS DO CAMPEONATO (Uma regra por linha)</span>
+                <span className="text-[10px] text-slate-500">Exibidas detalhadamente no app e perfil</span>
+              </label>
+              <textarea
+                rows={4}
+                placeholder="1. Medição obrigatória em fita métrica homologada com a palavra-chave visível.&#10;2. Prática estrita do pesque e solte.&#10;3. Envio da foto com boa iluminação e nitidez da régua.&#10;4. Vídeo de soltura comprovando que o peixe nadou com vida."
+                value={rulesText}
+                onChange={(e) => setRulesText(e.target.value)}
+                className="w-full bg-[#181a1f] border border-slate-800 text-slate-200 rounded-2xl p-4 text-xs sm:text-sm font-sans focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+              />
+            </div>
+
+            {/* Banner Presets / Image URL */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-                <span>Sugestões de Imagens de Capa (ou insira a URL acima):</span>
+                <span>URL da Imagem de Capa (ou selecione uma sugestão abaixo):</span>
                 {imageUrl && (
                   <button 
                     type="button" 
@@ -1609,6 +1847,13 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   </button>
                 )}
               </div>
+              <input
+                type="text"
+                placeholder="https://images.unsplash.com/..."
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 font-mono"
+              />
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {IMAGE_PRESETS.map((p, idx) => (
                   <div
@@ -1631,7 +1876,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  DIAS DE INSCRIÇÃO
+                  DIAS PARA INSCRIÇÃO (PERÍODO ABERTO)
                 </label>
                 <input
                   type="number"
@@ -1645,7 +1890,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
               <div>
                 <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  LIMITE DE PARTICIPANTES
+                  LIMITE MÁXIMO DE PARTICIPANTES / EQUIPES
                 </label>
                 <input
                   type="number"
@@ -1663,7 +1908,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               <div className="flex-1">
                 <input
                   type="text"
-                  placeholder="Código de Participação (Opcional)"
+                  placeholder="Código de Participação / Cupom Inicial (Opcional)"
                   value={participationCode}
                   onChange={(e) => setParticipationCode(e.target.value.toUpperCase())}
                   className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm font-mono uppercase focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
@@ -1678,58 +1923,90 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </button>
             </div>
 
-            {/* Row 5: JANELAS DE CAPTURA VÁLIDAS Box */}
+            {/* Row 5: JANELAS DE CAPTURA VÁLIDAS (FASES DO CAMPEONATO) Box */}
             <div className="bg-[#181a1f] border border-slate-800/80 rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-bold uppercase text-slate-300">
-                  JANELAS DE CAPTURA VÁLIDAS
-                </span>
-                <span className="text-[11px] font-mono text-slate-500">
-                  {captureWindows.length} {captureWindows.length === 1 ? 'janela configurada' : 'janelas configuradas'}
+                <div>
+                  <span className="text-xs font-mono font-bold uppercase text-slate-300 block">
+                    JANELAS DE CAPTURA VÁLIDAS (FASES / ETAPAS)
+                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    Defina os dias e horários em que os pescadores podem enviar capturas. Uma notificação será enviada para o perfil de todos os inscritos.
+                  </p>
+                </div>
+                <span className="text-[11px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 shrink-0">
+                  {captureWindows.length} {captureWindows.length === 1 ? 'janela' : 'janelas'}
                 </span>
               </div>
 
               {/* Add Window Inputs Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-center">
-                <input
-                  type="date"
-                  placeholder="dd/mm/aaaa"
-                  value={newWindowDate}
-                  onChange={(e) => setNewWindowDate(e.target.value)}
-                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-2.5 items-end bg-[#121316] p-3.5 rounded-2xl border border-slate-800">
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 block mb-1">Nome da Etapa</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 1ª Etapa"
+                    value={newWindowName}
+                    onChange={(e) => setNewWindowName(e.target.value)}
+                    className="w-full bg-[#1a1c20] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#00e676]"
+                  />
+                </div>
 
-                <input
-                  type="text"
-                  placeholder="Segredo / Palavra"
-                  value={newWindowSecret}
-                  onChange={(e) => setNewWindowSecret(e.target.value.toUpperCase())}
-                  className="bg-[#121316] border border-slate-800 text-amber-400 font-mono font-bold rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-[#00e676] uppercase placeholder-slate-500"
-                />
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 block mb-1">Data da Etapa *</label>
+                  <input
+                    type="date"
+                    value={newWindowDate}
+                    onChange={(e) => setNewWindowDate(e.target.value)}
+                    className="w-full bg-[#1a1c20] border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                  />
+                </div>
 
-                <input
-                  type="time"
-                  placeholder="--:--"
-                  value={newWindowStartTime}
-                  onChange={(e) => setNewWindowStartTime(e.target.value)}
-                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
-                />
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 block mb-1 flex items-center justify-between">
+                    <span>Chave Antifraude</span>
+                    <button type="button" onClick={handleGenerateWindowSecret} className="text-[#00e676] text-[9px] hover:underline cursor-pointer lowercase">
+                      gerar
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: ETAPA-X"
+                    value={newWindowSecret}
+                    onChange={(e) => setNewWindowSecret(e.target.value.toUpperCase())}
+                    className="w-full bg-[#1a1c20] border border-slate-800 text-amber-400 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#00e676] uppercase placeholder-slate-500"
+                  />
+                </div>
 
-                <input
-                  type="time"
-                  placeholder="--:--"
-                  value={newWindowEndTime}
-                  onChange={(e) => setNewWindowEndTime(e.target.value)}
-                  className="bg-[#121316] border border-slate-800 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-[#00e676]"
-                />
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 block mb-1">Início</label>
+                  <input
+                    type="time"
+                    value={newWindowStartTime}
+                    onChange={(e) => setNewWindowStartTime(e.target.value)}
+                    className="w-full bg-[#1a1c20] border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                  />
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleAddCaptureWindow}
-                  className="bg-[#2a2d34] hover:bg-[#343842] text-slate-200 font-bold px-3 py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer whitespace-nowrap border border-slate-700/50"
-                >
-                  ADICIONAR JANELA
-                </button>
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 block mb-1">Término</label>
+                  <input
+                    type="time"
+                    value={newWindowEndTime}
+                    onChange={(e) => setNewWindowEndTime(e.target.value)}
+                    className="w-full bg-[#1a1c20] border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#00e676]"
+                  />
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleAddCaptureWindow}
+                    className="w-full bg-[#00e676] hover:bg-[#00c853] text-slate-950 font-extrabold px-3 py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer whitespace-nowrap shadow-md"
+                  >
+                    + ADICIONAR
+                  </button>
+                </div>
               </div>
 
               {/* List of Added Windows */}
@@ -1738,6 +2015,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   {captureWindows.map((win, idx) => (
                     <div key={win.id || idx} className="flex items-center justify-between bg-[#121316] p-3 rounded-xl border border-slate-800 text-xs font-mono">
                       <div className="flex flex-wrap items-center gap-3">
+                        <span className="font-bold text-white uppercase">{win.name || `Etapa ${idx + 1}`}</span>
                         <span className="text-slate-400">📅 {win.date}</span>
                         <span className="text-sky-400">⏰ {win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
                         <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded font-bold">
@@ -1760,9 +2038,12 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
             {/* Row 6: Descrição */}
             <div>
+              <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                DESCRIÇÃO GERAL DO TORNEIO
+              </label>
               <textarea
                 rows={3}
-                placeholder="Descrição"
+                placeholder="Descreva os objetivos, o local de pesca ou represa, regulamento específico e orientações gerais aos competidores..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm min-h-[90px] focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
@@ -3283,6 +3564,210 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-lg shadow-rose-950/40"
               >
                 Confirmar Reprovação
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GERENCIAMENTO DE JANELAS DE CAPTURA (FASES DO CAMPEONATO) */}
+      {managingWindowsTourney && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl p-6 sm:p-8 space-y-6 my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20">
+                  <Clock className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">Janelas de Captura & Fases</h3>
+                  <p className="text-xs text-slate-400">
+                    Campeonato: <strong className="text-white">{managingWindowsTourney.title}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setManagingWindowsTourney(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Notification Announcement Banner */}
+            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-start gap-3 text-xs text-emerald-300">
+              <span className="text-base">🔔</span>
+              <div>
+                <strong className="block text-white font-bold">Notificação em Tempo Real no Perfil:</strong>
+                Sempre que você adicionar uma nova janela/fase aqui, todos os competidores inscritos neste campeonato receberão um aviso instantâneo no perfil com o dia, horário e código antifraude!
+              </div>
+            </div>
+
+            {modalWinError && (
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-xs text-rose-400 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{modalWinError}</span>
+              </div>
+            )}
+
+            {modalWinSuccess && (
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-xs text-emerald-400 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{modalWinSuccess}</span>
+              </div>
+            )}
+
+            {/* Form: Add New Window */}
+            <form onSubmit={handleAddWindowToExistingTournament} className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-4">
+              <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <span>+ Adicionar Nova Janela de Captura (Etapa)</span>
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Nome / Identificação da Etapa</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 2ª Etapa - Classificatória"
+                    value={modalWinName}
+                    onChange={(e) => setModalWinName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-emerald-500 font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Data da Etapa *</label>
+                  <input
+                    type="date"
+                    required
+                    value={modalWinDate}
+                    onChange={(e) => setModalWinDate(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1 flex items-center justify-between">
+                    <span>Chave Antifraude</span>
+                    <button
+                      type="button"
+                      onClick={() => setModalWinSecret(generateUniqueTournamentCode('ETAPA'))}
+                      className="text-emerald-400 text-[9px] hover:underline cursor-pointer lowercase"
+                    >
+                      gerar chave
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: ETAPA-X"
+                    value={modalWinSecret}
+                    onChange={(e) => setModalWinSecret(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-900 border border-slate-800 text-amber-400 font-mono font-bold rounded-xl px-3 py-2.5 text-xs uppercase focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Horário de Início</label>
+                  <input
+                    type="time"
+                    value={modalWinStartTime}
+                    onChange={(e) => setModalWinStartTime(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Horário de Término</label>
+                  <input
+                    type="time"
+                    value={modalWinEndTime}
+                    onChange={(e) => setModalWinEndTime(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-mono focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Observações da Fase (Opcional)</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Válido apenas para capturas na represa norte com soltura filmada."
+                  value={modalWinDesc}
+                  onChange={(e) => setModalWinDesc(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="submit"
+                  disabled={isAddingModalWin}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Calendar className="h-4 w-4" />
+                  <span>{isAddingModalWin ? 'Cadastrando & Notificando...' : 'Publicar Janela & Notificar Pescadores'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* List of Existing Windows */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-mono font-bold text-slate-400 uppercase">
+                Janelas Atuais Cadastradas ({managingWindowsTourney.captureWindows?.length || 0}):
+              </h4>
+
+              {(!managingWindowsTourney.captureWindows || managingWindowsTourney.captureWindows.length === 0) ? (
+                <div className="p-6 text-center text-xs text-slate-500 bg-slate-950/50 rounded-2xl border border-slate-800/80">
+                  Nenhuma janela de captura cadastrada especificamente. As capturas seguem o período geral do torneio.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {managingWindowsTourney.captureWindows.map((win, idx) => (
+                    <div
+                      key={win.id || idx}
+                      className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1 font-mono">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white uppercase text-xs">{win.name || `Etapa ${idx + 1}`}</span>
+                          <span className="bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                            🔑 {win.secret}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-slate-400 text-[11px]">
+                          <span>📅 {win.date}</span>
+                          <span>⏰ {win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
+                        </div>
+                        {win.description && (
+                          <p className="text-[10px] text-slate-500 font-sans">{win.description}</p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => handleRemoveWindowFromExistingTournament(win.id)}
+                        className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer shrink-0"
+                        title="Excluir Janela"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setManagingWindowsTourney(null)}
+                className="px-5 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700 transition cursor-pointer"
+              >
+                Fechar Painel
               </button>
             </div>
           </div>

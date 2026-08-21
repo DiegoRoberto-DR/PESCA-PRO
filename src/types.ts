@@ -2,10 +2,29 @@ import { Timestamp } from 'firebase/firestore';
 
 export interface CaptureWindow {
   id: string;
-  date: string;
-  secret: string;
-  startTime: string;
-  endTime: string;
+  name?: string; // e.g. "1ª Etapa - Abertura", "Fase Final"
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  secret?: string; // Palavra-chave ou código antifraude da janela
+  description?: string;
+  createdAt?: any;
+}
+
+export interface AppNotification {
+  id: string;
+  userId?: string; // Se direcionado a um usuário específico, ou undefined para todos os inscritos
+  tournamentId?: string;
+  tournamentTitle?: string;
+  title: string;
+  message: string;
+  type: 'capture_window' | 'tournament_update' | 'team_update' | 'general';
+  windowDate?: string;
+  windowStartTime?: string;
+  windowEndTime?: string;
+  windowSecret?: string;
+  readBy?: string[]; // userIds que marcaram como lido
+  createdAt: any;
 }
 
 export interface Tournament {
@@ -22,7 +41,7 @@ export interface Tournament {
   prizeValue?: number;
   entryFeeType: 'gratis' | 'pago';
   entryFeeAmount?: number;
-  teamFormat: 'solo' | 'dupla' | 'trio' | 'quarteto';
+  teamFormat: 'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto';
   keyword: string;
   tournamentCode?: string; // Código de participação (opcional) gerado no cadastro
   daysForRegistration?: number; // Dias de inscrição
