@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Award, Trophy, Scale, Ruler, Search, ChevronDown, Fish } from 'lucide-react';
-import { Tournament, Catch } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Award, Trophy, Scale, Ruler, Search, ChevronDown, Fish, Weight, Users, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Tournament, Catch, UserProfile } from '../types';
+import { subscribeAllUsers } from '../utils/dbHelpers';
 
 interface LeaderboardProps {
   tournaments: Tournament[];
@@ -11,14 +12,34 @@ interface RankedEntry {
   userId: string;
   userName: string;
   userEmail: string;
+  userPhoto?: string;
+  nickname?: string;
   teamId?: string;
   teamName?: string;
   teamLogo?: string;
   bestCatch: Catch;
   allApprovedCatches: Catch[];
+  totalWeight: number; // Soma de quilos de todas as capturas aprovadas do competidor
+  totalLength: number; // Soma de comprimentos
 }
 
 export default function Leaderboard({ tournaments, catches }: LeaderboardProps) {
+  // Realtime users map for profile photos
+  const [usersMap, setUsersMap] = useState<Record<string, UserProfile>>({});
+
+  useEffect(() => {
+    const unsubscribe = subscribeAllUsers((users) => {
+      const map: Record<string, UserProfile> = {};
+      users.forEach((u) => {
+        if (u.uid) map[u.uid] = u;
+      });
+      setUsersMap(map);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
   // Select first active tournament by default
   const activeTournaments = tournaments.filter(t => t.status === 'active' || t.status === 'completed');
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(
@@ -26,6 +47,8 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
   );
   
   const currentTournament = tournaments.find(t => t.id === selectedTournamentId);
+  const isWeightTournament = currentTournament?.metric === 'weight';
+  const isBothMetric = currentTournament?.metric === 'both';
 
   // Compute rankings based on approved catches for current tournament
   const getRankings = (): RankedEntry[] => {
@@ -45,20 +68,24 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
       userGroups[c.userId].push(c);
     });
 
-    // For each user, find their single BEST catch according to tournament metric
+    // For each user, compute totals and find their single BEST catch according to tournament metric
     const rankings: RankedEntry[] = [];
     
     Object.keys(userGroups).forEach((userId) => {
       const userCatches = userGroups[userId];
       
+      // Calculate total weight and length
+      const totalWeight = userCatches.reduce((sum, c) => sum + (typeof c.weight === 'number' ? c.weight : 0), 0);
+      const totalLength = userCatches.reduce((sum, c) => sum + (typeof c.length === 'number' ? c.length : 0), 0);
+
       // Sort to find the absolute best catch
       const sorted = [...userCatches].sort((a, b) => {
         if (!currentTournament) return 0;
         const metric = currentTournament.metric;
-        if (metric === 'length') {
-          return b.length - a.length;
-        } else if (metric === 'weight') {
+        if (metric === 'weight') {
           return (b.weight || 0) - (a.weight || 0);
+        } else if (metric === 'length') {
+          return b.length - a.length;
         } else {
           // If both, count length as primary, weight as tiebreaker
           const doubleDiff = b.length - a.length;
@@ -67,26 +94,35 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
         }
       });
 
+      const userProfile = usersMap[userId];
+
       rankings.push({
         userId,
-        userName: sorted[0].userName,
+        userName: userProfile?.fullName || userProfile?.displayName || sorted[0].userName,
         userEmail: sorted[0].userEmail,
+        userPhoto: userProfile?.photoURL,
+        nickname: userProfile?.nickname,
         teamId: sorted[0].teamId,
         teamName: sorted[0].teamName,
         teamLogo: sorted[0].teamLogo,
         bestCatch: sorted[0],
-        allApprovedCatches: userCatches
+        allApprovedCatches: userCatches,
+        totalWeight,
+        totalLength
       });
     });
 
-    // Sort contestants by best catch
+    // Sort contestants by tournament criteria
     return rankings.sort((a, b) => {
       if (!currentTournament) return 0;
       const metric = currentTournament.metric;
-      if (metric === 'length') {
+      if (metric === 'weight') {
+        // First by best catch weight, then by total accumulated weight
+        const diffBest = (b.bestCatch.weight || 0) - (a.bestCatch.weight || 0);
+        if (diffBest !== 0) return diffBest;
+        return b.totalWeight - a.totalWeight;
+      } else if (metric === 'length') {
         return b.bestCatch.length - a.bestCatch.length;
-      } else if (metric === 'weight') {
-        return (b.bestCatch.weight || 0) - (a.bestCatch.weight || 0);
       } else {
         const doubleDiff = b.bestCatch.length - a.bestCatch.length;
         if (doubleDiff !== 0) return doubleDiff;
@@ -96,6 +132,23 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
   };
 
   const rankings = getRankings();
+
+  // Calculate tournament aggregate statistics
+  const totalTournamentWeight = catches
+    .filter(c => c.tournamentId === selectedTournamentId && c.status === 'approved')
+    .reduce((sum, c) => sum + (typeof c.weight === 'number' ? c.weight : 0), 0);
+
+  const totalTournamentCatches = catches
+    .filter(c => c.tournamentId === selectedTournamentId && c.status === 'approved')
+    .length;
+
+  const heaviestCatch = catches
+    .filter(c => c.tournamentId === selectedTournamentId && c.status === 'approved' && typeof c.weight === 'number')
+    .sort((a, b) => (b.weight || 0) - (a.weight || 0))[0];
+
+  const longestCatch = catches
+    .filter(c => c.tournamentId === selectedTournamentId && c.status === 'approved')
+    .sort((a, b) => b.length - a.length)[0];
 
   return (
     <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
@@ -107,7 +160,7 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
             <span className="text-[#00e676]">TORNEIO</span>
           </h1>
           <p className="text-slate-400 text-xs sm:text-sm mt-0.5">
-            Acompanhe o desempenho em tempo real
+            Acompanhe o desempenho, pesagem oficial e posições em tempo real
           </p>
         </div>
 
@@ -124,7 +177,7 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
             )}
             {tournaments.map((t) => (
               <option key={t.id} value={t.id} className="bg-[#121316] text-white">
-                {t.title}
+                {t.title} {t.status === 'completed' ? '🏁 (Finalizado)' : ''}
               </option>
             ))}
           </select>
@@ -134,6 +187,63 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
         </div>
       </div>
 
+      {/* Stats Ribbon for Kilo / Metric Tournaments */}
+      {currentTournament && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-[#121316] border border-slate-800 p-4 rounded-2xl">
+            <span className="text-[10px] font-mono uppercase text-slate-500 font-bold block">Critério Oficial</span>
+            <span className="text-sm font-black text-emerald-400 uppercase mt-0.5 flex items-center gap-1.5">
+              {isWeightTournament ? (
+                <>
+                  <Scale className="h-4 w-4" />
+                  <span>Por Peso (Quilos / Kg)</span>
+                </>
+              ) : isBothMetric ? (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  <span>Comprimento & Peso</span>
+                </>
+              ) : (
+                <>
+                  <Ruler className="h-4 w-4" />
+                  <span>Por Comprimento (cm)</span>
+                </>
+              )}
+            </span>
+          </div>
+
+          <div className="bg-[#121316] border border-slate-800 p-4 rounded-2xl">
+            <span className="text-[10px] font-mono uppercase text-slate-500 font-bold block">Capturas Validadas</span>
+            <span className="text-base font-black text-white font-mono mt-0.5 block">
+              {totalTournamentCatches} {totalTournamentCatches === 1 ? 'peixe' : 'peixes'}
+            </span>
+          </div>
+
+          {(isWeightTournament || isBothMetric || totalTournamentWeight > 0) && (
+            <div className="bg-[#121316] border border-emerald-500/30 bg-emerald-500/5 p-4 rounded-2xl">
+              <span className="text-[10px] font-mono uppercase text-emerald-400 font-bold block flex items-center gap-1">
+                <Scale className="h-3.5 w-3.5" />
+                <span>Total de Kg no Torneio</span>
+              </span>
+              <span className="text-base sm:text-lg font-black text-[#00e676] font-mono mt-0.5 block">
+                {totalTournamentWeight.toFixed(2)} kg
+              </span>
+            </div>
+          )}
+
+          <div className="bg-[#121316] border border-slate-800 p-4 rounded-2xl">
+            <span className="text-[10px] font-mono uppercase text-slate-500 font-bold block">Maior Exemplar</span>
+            <span className="text-sm font-black text-amber-400 font-mono mt-0.5 block">
+              {isWeightTournament && heaviestCatch?.weight
+                ? `${heaviestCatch.weight.toFixed(2)} kg (${heaviestCatch.species})`
+                : longestCatch
+                ? `${longestCatch.length} cm (${longestCatch.species})`
+                : 'Aguardando'}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Main Ranking Table Card matching rank torneios.png */}
       <div className="bg-[#121316] border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
@@ -141,16 +251,28 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
             <thead>
               <tr className="border-b border-slate-800/80 text-slate-500 text-[11px] font-mono uppercase font-bold tracking-wider">
                 <th className="py-4 px-6 text-left w-20">POS</th>
-                <th className="py-4 px-6 text-left">EQUIPE / PESCADOR</th>
+                <th className="py-4 px-6 text-left">PESCADOR / EQUIPE</th>
                 <th className="py-4 px-6 text-center">CAPTURAS</th>
                 <th className="py-4 px-6 text-center">DESTAQUE</th>
-                <th className="py-4 px-6 text-right">MAIOR PEIXE</th>
+                {isWeightTournament ? (
+                  <>
+                    <th className="py-4 px-6 text-center">MAIOR CAPTURA (KG)</th>
+                    <th className="py-4 px-6 text-right">TOTAL ACUMULADO</th>
+                  </>
+                ) : isBothMetric ? (
+                  <>
+                    <th className="py-4 px-6 text-center">COMPRIMENTO / PESO</th>
+                    <th className="py-4 px-6 text-right">TOTAL EM KG</th>
+                  </>
+                ) : (
+                  <th className="py-4 px-6 text-right">MAIOR PEIXE</th>
+                )}
               </tr>
             </thead>
             <tbody>
               {rankings.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-20 px-6 text-center text-slate-500 font-medium text-sm">
+                  <td colSpan={6} className="py-20 px-6 text-center text-slate-500 font-medium text-sm">
                     Nenhuma captura validada para este torneio.
                   </td>
                 </tr>
@@ -160,6 +282,9 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
                   const isGold = position === 1;
                   const isSilver = position === 2;
                   const isBronze = position === 3;
+
+                  // Photo to display: User Profile Photo > Team Logo > Letter Avatar
+                  const displayPhoto = entry.userPhoto || entry.teamLogo;
 
                   return (
                     <tr 
@@ -171,11 +296,11 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
                         <div className="flex items-center gap-2">
                           <span className={`inline-flex items-center justify-center font-mono font-bold text-xs sm:text-sm px-2.5 py-1 rounded-xl ${
                             isGold 
-                              ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 shadow-sm' 
+                              ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 shadow-sm font-extrabold' 
                               : isSilver 
-                              ? 'bg-slate-300/20 text-slate-200 border border-slate-300/40' 
+                              ? 'bg-slate-300/20 text-slate-200 border border-slate-300/40 font-extrabold' 
                               : isBronze 
-                              ? 'bg-amber-700/20 text-amber-500 border border-amber-600/40' 
+                              ? 'bg-amber-700/20 text-amber-500 border border-amber-600/40 font-extrabold' 
                               : 'text-slate-400 font-semibold'
                           }`}>
                             {position}º
@@ -184,28 +309,35 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
                         </div>
                       </td>
 
-                      {/* EQUIPE / PESCADOR Column */}
+                      {/* EQUIPE / PESCADOR Column (With Profile Photo) */}
                       <td className="py-4 px-6">
                         <div className="flex items-center space-x-3.5">
-                          <div className="h-10 w-10 rounded-full bg-slate-800/90 border border-slate-700 overflow-hidden flex items-center justify-center font-bold text-slate-200 shrink-0">
-                            {entry.teamLogo ? (
+                          <div className="h-11 w-11 rounded-2xl bg-slate-800/90 border border-emerald-500/30 overflow-hidden flex items-center justify-center font-bold text-slate-200 shrink-0 shadow-md">
+                            {displayPhoto ? (
                               <img 
-                                src={entry.teamLogo} 
-                                alt={entry.teamName || 'Equipe'} 
+                                src={displayPhoto} 
+                                alt={entry.userName} 
                                 referrerPolicy="no-referrer"
                                 className="w-full h-full object-cover"
                               />
                             ) : (
-                              <span>{entry.userName.charAt(0).toUpperCase()}</span>
+                              <span className="text-base text-emerald-400 font-black">
+                                {entry.userName.charAt(0).toUpperCase()}
+                              </span>
                             )}
                           </div>
                           <div>
                             <div className="font-bold text-white group-hover:text-[#00e676] transition-colors flex items-center gap-2">
                               <span>{entry.userName}</span>
+                              {entry.nickname && (
+                                <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                                  @{entry.nickname}
+                                </span>
+                              )}
                             </div>
                             {entry.teamName && (
                               <p className="text-xs text-[#00e676] font-semibold font-mono flex items-center gap-1 mt-0.5">
-                                <span>👥 {entry.teamName}</span>
+                                <span>👥 Equipe: {entry.teamName}</span>
                               </p>
                             )}
                           </div>
@@ -215,7 +347,7 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
                       {/* CAPTURAS Column */}
                       <td className="py-4 px-6 text-center">
                         <span className="inline-flex items-center px-3 py-1 bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono font-bold text-slate-300">
-                          {entry.allApprovedCatches.length} {entry.allApprovedCatches.length === 1 ? 'captura' : 'capturas'}
+                          {entry.allApprovedCatches.length} {entry.allApprovedCatches.length === 1 ? 'peixe' : 'peixes'}
                         </span>
                       </td>
 
@@ -238,19 +370,71 @@ export default function Leaderboard({ tournaments, catches }: LeaderboardProps) 
                         </div>
                       </td>
 
-                      {/* MAIOR PEIXE Column */}
-                      <td className="py-4 px-6 text-right">
-                        <div className="font-mono">
-                          <span className="text-base sm:text-lg font-black text-[#00e676]">
-                            {entry.bestCatch.length} cm
-                          </span>
-                          {entry.bestCatch.weight !== undefined && (
-                            <span className="block text-[11px] text-slate-400 font-medium">
-                              {entry.bestCatch.weight} kg
+                      {/* MAIOR PEIXE / KILOS Columns */}
+                      {isWeightTournament ? (
+                        <>
+                          <td className="py-4 px-6 text-center">
+                            <div className="font-mono">
+                              <span className="text-base sm:text-lg font-black text-[#00e676]">
+                                {entry.bestCatch.weight !== undefined ? `${entry.bestCatch.weight.toFixed(2)} kg` : '--'}
+                              </span>
+                              {entry.bestCatch.length && (
+                                <span className="block text-[11px] text-slate-400">
+                                  {entry.bestCatch.length} cm
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-4 px-6 text-right">
+                            <div className="font-mono">
+                              <span className="text-base font-black text-amber-400">
+                                {entry.totalWeight.toFixed(2)} kg
+                              </span>
+                              <span className="block text-[10px] text-slate-500 uppercase">
+                                Total Pego
+                              </span>
+                            </div>
+                          </td>
+                        </>
+                      ) : isBothMetric ? (
+                        <>
+                          <td className="py-4 px-6 text-center">
+                            <div className="font-mono">
+                              <span className="text-base font-black text-[#00e676]">
+                                {entry.bestCatch.length} cm
+                              </span>
+                              {entry.bestCatch.weight !== undefined && (
+                                <span className="block text-xs text-amber-400 font-bold">
+                                  {entry.bestCatch.weight.toFixed(2)} kg
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-4 px-6 text-right">
+                            <div className="font-mono">
+                              <span className="text-base font-black text-amber-400">
+                                {entry.totalWeight > 0 ? `${entry.totalWeight.toFixed(2)} kg` : '--'}
+                              </span>
+                              <span className="block text-[10px] text-slate-500 uppercase">
+                                Total acumulado
+                              </span>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <td className="py-4 px-6 text-right">
+                          <div className="font-mono">
+                            <span className="text-base sm:text-lg font-black text-[#00e676]">
+                              {entry.bestCatch.length} cm
                             </span>
-                          )}
-                        </div>
-                      </td>
+                            {entry.bestCatch.weight !== undefined && entry.bestCatch.weight > 0 && (
+                              <span className="block text-[11px] text-slate-400 font-medium">
+                                {entry.bestCatch.weight.toFixed(2)} kg
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

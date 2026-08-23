@@ -16,27 +16,45 @@ import {
   where
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification } from '../types';
+import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification, SupportMessage } from '../types';
 
 // Helper to remove any undefined fields before sending to Firestore (prevents Firebase Unsupported undefined errors)
 export function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
-  if (!obj || typeof obj !== 'object') return obj;
-  const cleaned: any = Array.isArray(obj) ? [] : {};
-  
-  Object.keys(obj).forEach((key) => {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+  if (obj instanceof Date) return obj;
+  // Preserve Firestore FieldValues (serverTimestamp, arrayUnion, arrayRemove, increment, etc.)
+  if (obj.constructor && (obj.constructor.name === 'FieldValue' || obj.constructor.name === 'ServerTimestampTransform')) return obj;
+  if ('_methodName' in obj || '_delegate' in obj || '_type' in obj) return obj;
+
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => (typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item)) as any;
+  }
+
+  const cleaned: any = {};
+  for (const key of Object.keys(obj)) {
     const val = obj[key];
-    if (val !== undefined) {
-      if (Array.isArray(val)) {
-        cleaned[key] = val.map((item: any) => 
-          typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item
-        );
-      } else if (typeof val === 'object' && val !== null && !(val instanceof Date) && !('_methodName' in val)) {
-        cleaned[key] = cleanFirestoreData(val);
-      } else {
-        cleaned[key] = val;
-      }
+    if (val === undefined) {
+      continue; // Strip out undefined completely
     }
-  });
+    if (val === null) {
+      cleaned[key] = null;
+    } else if (Array.isArray(val)) {
+      cleaned[key] = val
+        .filter((item) => item !== undefined)
+        .map((item) => (typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item));
+    } else if (typeof val === 'object') {
+      if (val instanceof Date || '_methodName' in val || '_delegate' in val || '_type' in val || (val.constructor && val.constructor.name === 'FieldValue')) {
+        cleaned[key] = val;
+      } else {
+        cleaned[key] = cleanFirestoreData(val);
+      }
+    } else {
+      cleaned[key] = val;
+    }
+  }
   return cleaned;
 }
 
@@ -245,7 +263,7 @@ export function subscribeCatches(callback: (catches: Catch[]) => void) {
 
 // Submit a catch
 export async function submitCatch(catchData: Omit<Catch, 'id' | 'createdAt' | 'status' | 'likes' | 'comments'>): Promise<string> {
-  const docRef = await addDoc(collection(db, 'catches'), {
+  const dataToSave = cleanFirestoreData({
     ...catchData,
     status: 'pending',
     likes: [],
@@ -253,18 +271,65 @@ export async function submitCatch(catchData: Omit<Catch, 'id' | 'createdAt' | 's
     createdAt: serverTimestamp()
   });
 
+  const docRef = await addDoc(collection(db, 'catches'), dataToSave);
+
   // Increment participant count in tournament Doc
   try {
     const tourRef = doc(db, 'tournaments', catchData.tournamentId);
-    // Dynamic fetch and update count
     await updateDoc(tourRef, {
-      participantCount: arrayUnion(catchData.userId) as any // We would use increment or similar, but for simplicity let's just make it a number update or direct increment helper
+      participantCount: arrayUnion(catchData.userId) as any
     });
   } catch (e) {
     console.warn("Erro ao atualizar contagem de participantes:", e);
   }
 
   return docRef.id;
+}
+
+// Finalize Tournament and Crown Champions
+export async function finalizeTournamentWithChampions(
+  tournamentId: string,
+  tournamentTitle: string,
+  champion: any,
+  runnerUp?: any,
+  thirdPlace?: any,
+  closingNotes?: string
+): Promise<void> {
+  const tourRef = doc(db, 'tournaments', tournamentId);
+  
+  const updatePayload: any = {
+    status: 'completed',
+    completedAt: new Date().toISOString()
+  };
+
+  if (champion) {
+    updatePayload.championInfo = cleanFirestoreData(champion);
+  }
+  if (runnerUp) {
+    updatePayload.runnerUpInfo = cleanFirestoreData(runnerUp);
+  }
+  if (thirdPlace) {
+    updatePayload.thirdPlaceInfo = cleanFirestoreData(thirdPlace);
+  }
+
+  await updateDoc(tourRef, cleanFirestoreData(updatePayload));
+
+  // Send Celebration Broadcast Notification
+  try {
+    const champName = champion?.userName || 'Pescador Vencedor';
+    const notifData: Omit<AppNotification, 'id'> = {
+      tournamentId,
+      tournamentTitle,
+      title: `🏆 CAMPEONATO ENCERRADO: ${tournamentTitle}`,
+      message: `O campeonato foi finalizado com sucesso! Parabéns ao grande Campeão: ${champName} 🥇! Confira o pódio oficial e o ranking final no app.`,
+      type: 'tournament_update',
+      readBy: [],
+      createdAt: serverTimestamp()
+    };
+    await addDoc(collection(db, 'notifications'), cleanFirestoreData(notifData));
+  } catch (notifErr) {
+    console.warn("Aviso ao disparar notificação de encerramento de torneio:", notifErr);
+  }
 }
 
 // Modify Tournament Participant Count (real update)
@@ -737,7 +802,7 @@ export async function createTournamentCode(
   };
 }
 
-// Create an individual participation code strictly ASSIGNED to a specific user (Anti-fraud)
+// Create an individual participation code strictly ASSIGNED to a specific user/team (Anti-fraud)
 export async function createAssignedTournamentCode(data: {
   tournamentId: string;
   tournamentTitle: string;
@@ -745,17 +810,36 @@ export async function createAssignedTournamentCode(data: {
   userName: string;
   userEmail: string;
   userCpf?: string;
+  category?: 'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto';
+  maxParticipants?: number;
   paymentStatus?: 'paid' | 'pending' | 'free';
   paymentAmount?: number;
   paymentNotes?: string;
   customCode?: string;
   createdBy?: string;
 }): Promise<TournamentCode> {
-  // Generate code with user-specific seed or custom
+  // Determine capacity from category or direct maxParticipants
+  let finalMax = data.maxParticipants || 1;
+  const cat = data.category || 'solo';
+  if (cat === 'dupla') finalMax = 2;
+  else if (cat === 'trio') finalMax = 3;
+  else if (cat === 'quarteto') finalMax = 4;
+  else if (cat === 'quinteto') finalMax = 5;
+  else if (cat === 'solo') finalMax = 1;
+
+  // Generate unique code
   let finalCode = data.customCode ? data.customCode.trim().toUpperCase() : '';
   if (!finalCode) {
     const cpfSuffix = data.userCpf ? data.userCpf.replace(/\D/g, '').slice(-4) : 'USR';
-    finalCode = generateUniqueTournamentCode(`TRN-${cpfSuffix}`);
+    const prefix = cat === 'solo' ? `TRN-${cpfSuffix}` : `EQP-${cpfSuffix}`;
+    finalCode = generateUniqueTournamentCode(prefix);
+  }
+
+  // Ensure code uniqueness in firestore
+  const existingSnap = await getDocs(query(collection(db, 'tournament_codes'), where('code', '==', finalCode)));
+  if (!existingSnap.empty) {
+    // If collision, generate fresh random code
+    finalCode = generateUniqueTournamentCode('TRN');
   }
 
   const docData = {
@@ -766,6 +850,10 @@ export async function createAssignedTournamentCode(data: {
     assignedToUserName: data.userName,
     assignedToUserEmail: data.userEmail.toLowerCase(),
     assignedToUserCpf: data.userCpf || '',
+    category: cat,
+    maxParticipants: finalMax,
+    usedCount: 0,
+    usedByMembers: [],
     paymentStatus: data.paymentStatus || 'paid',
     paymentAmount: data.paymentAmount || 0,
     paymentNotes: data.paymentNotes || '',
@@ -938,23 +1026,50 @@ export async function validateAndConsumeTournamentCode(
         };
       }
 
-      // ANTI-FRAUD CHECK 3: Check if code was ALREADY used
-      if (codeRecord.isUsed) {
-        const usedDateStr = codeRecord.usedAt
-          ? (codeRecord.usedAt.toDate ? codeRecord.usedAt.toDate().toLocaleString('pt-BR') : new Date(codeRecord.usedAt).toLocaleString('pt-BR'))
-          : 'data anterior';
-        const usedUserStr = codeRecord.usedByUserName || codeRecord.usedByUserEmail || 'outro competidor';
+      const maxLimit = codeRecord.maxParticipants || 1;
+      const currentUsedCount = codeRecord.usedCount || (codeRecord.isUsed ? maxLimit : 0);
+      const existingMembers = codeRecord.usedByMembers || [];
 
+      // Check if this specific user already used this code
+      const alreadyUsedByUser = existingMembers.some(m => m.userId === user.uid || (user.email && m.userEmail.toLowerCase() === user.email.toLowerCase()));
+
+      if (alreadyUsedByUser) {
+        // Already enrolled
+        await enrollUserInTournament(user.uid, tournamentId);
         return {
-          success: false,
-          message: `🔒 CÓDIGO JÁ UTILIZADO: Este código (${cleanCode}) foi consumido em ${usedDateStr} por ${usedUserStr} e não pode ser reutilizado.`
+          success: true,
+          message: `Você já está inscrito neste campeonato com este código (${cleanCode})!`,
+          tournamentTitle: codeRecord.tournamentTitle
         };
       }
 
-      // Consume the code (mark as used and register participant)
+      // ANTI-FRAUD CHECK 3: Check if code has reached maxParticipants limit
+      if (codeRecord.isUsed || currentUsedCount >= maxLimit) {
+        const memberNames = existingMembers.map(m => m.userName || m.userEmail).join(', ');
+        return {
+          success: false,
+          message: `🔒 LIMITE DE EQUIPE ATINGIDO: Este código (${cleanCode}) já atingiu a capacidade máxima de ${maxLimit} participante(s) (${memberNames || 'Vagas esgotadas'}). Não é possível cadastrar mais pessoas além do limite permitido.`
+        };
+      }
+
+      // Record member usage
+      const newUsedCount = currentUsedCount + 1;
+      const isNowFullyUsed = newUsedCount >= maxLimit;
+      const newMemberEntry: any = {
+        userId: user.uid,
+        userName: user.displayName || user.fullName || user.email,
+        userEmail: user.email || '',
+        userCpf: user.cpf || '',
+        usedAt: new Date().toISOString()
+      };
+      const updatedMembers = [...existingMembers, newMemberEntry];
+
+      // Update the code in Firestore
       const codeDocRef = doc(db, 'tournament_codes', matchedDoc.id);
       await updateDoc(codeDocRef, {
-        isUsed: true,
+        usedCount: newUsedCount,
+        usedByMembers: updatedMembers,
+        isUsed: isNowFullyUsed,
         usedByUserId: user.uid,
         usedByUserName: user.displayName || user.fullName || user.email,
         usedByUserEmail: user.email,
@@ -1519,6 +1634,380 @@ export async function deleteTeamByAdmin(teamId: string): Promise<void> {
     }
   }
   await deleteDoc(teamRef);
+}
+
+// Lista de palavras e termos sonoros, fáceis e memoráveis para o pescador falar com clareza no vídeo de homologação
+export const EASY_VIDEO_KEYWORDS = [
+  'TUCUNA SHOW',
+  'ISCA VERDE',
+  'ANZOL DOURADO',
+  'DORADO BRASIL',
+  'RIO GRANDE',
+  'TRAIRA 10',
+  'PINDA 77',
+  'TAMBAQUI TOP',
+  'PEIXE VIVO',
+  'ISCA BRAVA',
+  'LAGO AZUL',
+  'PANTANAL 26',
+  'CORVINA BR',
+  'BASS MASTER',
+  'GIGANTE DO RIO',
+  'PIRARARA BR',
+  'PINCHO CERTO',
+  'LINHA FORTE',
+  'AGUA LIMPA',
+  'RIO PARANA',
+  'MARE BOA',
+  'FISGADA 10',
+  'ISCA DE OURO',
+  'CAMPEAO 2026',
+  'PESCA BRUTA',
+  'VALE TROFEU',
+  'TUCUNA AZUL',
+  'ISCA PLUG',
+  'PINTADO TOP',
+  'RIO ARAGUAIA',
+  'PESCA TOTAL',
+  'ANZOL AFIADO',
+  'SOLTURA 10',
+  'MEDICAO OFICIAL',
+  'TROFEU BRASIL'
+];
+
+// Gerador de palavra-chave fácil de falar no vídeo
+export function generateEasyVideoKeyword(): string {
+  const randomIndex = Math.floor(Math.random() * EASY_VIDEO_KEYWORDS.length);
+  return EASY_VIDEO_KEYWORDS[randomIndex];
+}
+
+// Formatar data e horário exato para auditoria
+export function formatExactDateTime(val: any): string {
+  if (!val) return 'Data não registrada';
+  let d: Date;
+  if (val instanceof Date) {
+    d = val;
+  } else if (val?.toDate && typeof val.toDate === 'function') {
+    d = val.toDate();
+  } else if (typeof val === 'number') {
+    d = new Date(val);
+  } else if (typeof val === 'string') {
+    d = new Date(val);
+  } else if (val?.seconds) {
+    d = new Date(val.seconds * 1000);
+  } else {
+    d = new Date();
+  }
+
+  if (isNaN(d.getTime())) return 'Data inválida';
+
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+
+  return `${day}/${month}/${year} às ${hours}:${minutes}:${seconds}`;
+}
+
+// Helper para verificar status de uma Janela de Captura individual
+export function getCaptureWindowStatus(win: CaptureWindow, now = new Date()): {
+  status: 'live' | 'upcoming' | 'expired';
+  label: string;
+  badgeColor: string;
+  timeRemainingStr?: string;
+  opensInStr?: string;
+  endDate?: Date;
+  remainingMs?: number;
+} {
+  if (!win || !win.date) {
+    return { status: 'expired', label: 'Indefinida', badgeColor: 'bg-slate-800 text-slate-400 border border-slate-700' };
+  }
+
+  const [year, month, day] = win.date.split('-').map(Number);
+  const [startH, startM] = (win.startTime || '06:00').split(':').map(Number);
+  const [endH, endM] = (win.endTime || '18:00').split(':').map(Number);
+
+  const startDate = new Date(year, month - 1, day, startH, startM, 0);
+  const endDate = new Date(year, month - 1, day, endH, endM, 0);
+
+  const nowMs = now.getTime();
+
+  if (nowMs < startDate.getTime()) {
+    const diffMs = startDate.getTime() - nowMs;
+    const diffH = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffM = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const opensInStr = diffH > 24 ? `${Math.floor(diffH / 24)}d ${diffH % 24}h` : `${diffH}h ${diffM}min`;
+    return { 
+      status: 'upcoming', 
+      label: `Abre em ${opensInStr}`, 
+      badgeColor: 'bg-sky-500/10 text-sky-400 border border-sky-500/30',
+      opensInStr,
+      endDate,
+      remainingMs: 0
+    };
+  }
+
+  if (nowMs >= startDate.getTime() && nowMs <= endDate.getTime()) {
+    // AO VIVO DENTRO DO HORÁRIO CONFIGURADO PELO ADMIN
+    const remainingMs = endDate.getTime() - nowMs;
+    const diffH = Math.floor(remainingMs / (1000 * 60 * 60));
+    const diffM = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+    const diffS = Math.floor((remainingMs % (1000 * 60)) / 1000);
+    const timeRemainingStr = `${String(diffH).padStart(2, '0')}h ${String(diffM).padStart(2, '0')}m ${String(diffS).padStart(2, '0')}s`;
+
+    return { 
+      status: 'live', 
+      label: 'AO VIVO AGORA', 
+      badgeColor: 'bg-emerald-500 text-slate-950 font-black shadow-lg shadow-emerald-500/30 animate-pulse',
+      timeRemainingStr,
+      endDate,
+      remainingMs
+    };
+  }
+
+  // APÓS O HORÁRIO CONFIGURADO PELO ADMIN (ENCERRADA)
+  return { 
+    status: 'expired', 
+    label: 'Encerrada', 
+    badgeColor: 'bg-rose-950/40 text-rose-400 border border-rose-800/60',
+    endDate,
+    remainingMs: 0
+  };
+}
+
+// Helper para formatar contagem regressiva precisa de milissegundos
+export function formatTimeRemainingMs(ms: number): {
+  hours: number;
+  minutes: number;
+  seconds: number;
+  formatted: string;
+} {
+  if (ms <= 0) {
+    return { hours: 0, minutes: 0, seconds: 0, formatted: '00h 00m 00s' };
+  }
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const formatted = `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  return { hours, minutes, seconds, formatted };
+}
+
+// Helper completo de verificação de permissão para envio de capturas
+export function getTournamentSubmissionDeadline(tournament: Tournament | null | undefined, now = new Date()): {
+  canSubmit: boolean;
+  status: 'open_live' | 'tournament_completed' | 'window_expired' | 'window_upcoming' | 'tournament_upcoming' | 'open_standard';
+  title: string;
+  message: string;
+  activeWindow: CaptureWindow | null;
+  deadlineDate: Date | null;
+  remainingMs: number;
+  remainingFormatted: string;
+} {
+  if (!tournament) {
+    return {
+      canSubmit: false,
+      status: 'window_expired',
+      title: 'Selecione um Torneio',
+      message: 'Selecione um campeonato para validar os prazos de envio.',
+      activeWindow: null,
+      deadlineDate: null,
+      remainingMs: 0,
+      remainingFormatted: '00h 00m 00s'
+    };
+  }
+
+  // REGRA 1: Torneio Encerrado / Concluído
+  if (tournament.status === 'completed') {
+    return {
+      canSubmit: false,
+      status: 'tournament_completed',
+      title: 'Campeonato Encerrado',
+      message: '🚫 Este campeonato foi oficialmente encerrado. Não é mais possível enviar capturas para avaliação.',
+      activeWindow: null,
+      deadlineDate: null,
+      remainingMs: 0,
+      remainingFormatted: '00h 00m 00s'
+    };
+  }
+
+  const windows = tournament.captureWindows || [];
+
+  // REGRA 2: Campeonato com Janelas de Captura estritas
+  if (windows.length > 0) {
+    let activeLiveWindow: CaptureWindow | null = null;
+    let nextUpcomingWindow: CaptureWindow | null = null;
+    let nextUpcomingStr = '';
+    let remainingMs = 0;
+    let windowEndDate: Date | null = null;
+
+    for (const w of windows) {
+      const st = getCaptureWindowStatus(w, now);
+      if (st.status === 'live') {
+        activeLiveWindow = w;
+        remainingMs = st.remainingMs || 0;
+        windowEndDate = st.endDate || null;
+        break;
+      } else if (st.status === 'upcoming' && !nextUpcomingWindow) {
+        nextUpcomingWindow = w;
+        nextUpcomingStr = st.opensInStr || '';
+      }
+    }
+
+    // Se existe janela ativa no exato momento (data e horário do Admin)
+    if (activeLiveWindow) {
+      const timeFmt = formatTimeRemainingMs(remainingMs).formatted;
+      return {
+        canSubmit: true,
+        status: 'open_live',
+        title: 'Janela de Captura Aberta (AO VIVO)',
+        message: `Prova em andamento (${activeLiveWindow.name || 'Etapa'}). O envio de capturas está liberado até às ${activeLiveWindow.endTime || '18:00'} de hoje.`,
+        activeWindow: activeLiveWindow,
+        deadlineDate: windowEndDate,
+        remainingMs,
+        remainingFormatted: timeFmt
+      };
+    }
+
+    // Se nenhuma janela está aberta agora, mas há janela futura
+    if (nextUpcomingWindow) {
+      const dateFormatted = nextUpcomingWindow.date ? nextUpcomingWindow.date.split('-').reverse().join('/') : '';
+      return {
+        canSubmit: false,
+        status: 'window_upcoming',
+        title: 'Janela de Captura Não Aberta',
+        message: `⏳ O envio ainda não está disponível. A próxima etapa (${nextUpcomingWindow.name || 'Etapa'}) abre em ${dateFormatted} às ${nextUpcomingWindow.startTime || '06:00'}${nextUpcomingStr ? ` (em ${nextUpcomingStr})` : ''}.`,
+        activeWindow: null,
+        deadlineDate: null,
+        remainingMs: 0,
+        remainingFormatted: '00h 00m 00s'
+      };
+    }
+
+    // Todas as janelas de captura do campeonato já encerraram no tempo estipulado pelo Admin
+    return {
+      canSubmit: false,
+      status: 'window_expired',
+      title: 'Janela de Captura Encerrada',
+      message: '🚫 A data e horário limite da janela de captura definidos pela Administração foram encerrados. Não é mais possível enviar capturas para avaliação deste campeonato.',
+      activeWindow: null,
+      deadlineDate: null,
+      remainingMs: 0,
+      remainingFormatted: '00h 00m 00s'
+    };
+  }
+
+  // REGRA 3: Campeonato Tradicional (sem janelas estritas)
+  if (tournament.status === 'upcoming') {
+    return {
+      canSubmit: false,
+      status: 'tournament_upcoming',
+      title: 'Torneio em Breve',
+      message: 'Este campeonato ainda não iniciou suas provas. Aguarde a data de início para enviar capturas.',
+      activeWindow: null,
+      deadlineDate: null,
+      remainingMs: 0,
+      remainingFormatted: '00h 00m 00s'
+    };
+  }
+
+  // Verifica data limite do campeonato tradicional se houver endDate
+  if (tournament.endDate) {
+    try {
+      const [endYear, endMonth, endDay] = tournament.endDate.split('-').map(Number);
+      const endDateTime = new Date(endYear, endMonth - 1, endDay, 23, 59, 59);
+      if (now.getTime() > endDateTime.getTime()) {
+        const formattedDate = `${String(endDay).padStart(2, '0')}/${String(endMonth).padStart(2, '0')}/${endYear}`;
+        return {
+          canSubmit: false,
+          status: 'tournament_completed',
+          title: 'Campeonato Encerrado',
+          message: `🚫 O prazo oficial deste campeonato encerrou em ${formattedDate}. Não é mais possível enviar capturas para avaliação.`,
+          activeWindow: null,
+          deadlineDate: null,
+          remainingMs: 0,
+          remainingFormatted: '00h 00m 00s'
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    canSubmit: true,
+    status: 'open_standard',
+    title: 'Envio Liberado',
+    message: 'Envio regular de capturas liberado durante todo o período do torneio.',
+    activeWindow: null,
+    deadlineDate: null,
+    remainingMs: 0,
+    remainingFormatted: ''
+  };
+}
+
+// Helper para verificar se um Torneio está AO VIVO no momento atual
+export function getTournamentLiveStatus(tournament: Tournament, now = new Date()): {
+  isLive: boolean;
+  activeWindow: CaptureWindow | null;
+  upcomingWindow: CaptureWindow | null;
+  timeRemainingStr: string;
+} {
+  if (!tournament || tournament.status !== 'active') {
+    return { isLive: false, activeWindow: null, upcomingWindow: null, timeRemainingStr: '' };
+  }
+
+  const windows = tournament.captureWindows || [];
+  if (windows.length === 0) {
+    // Torneio tradicional ativo sem janelas estritas
+    return { isLive: false, activeWindow: null, upcomingWindow: null, timeRemainingStr: '' };
+  }
+
+  let activeWin: CaptureWindow | null = null;
+  let upcomingWin: CaptureWindow | null = null;
+  let timeRemaining = '';
+
+  for (const w of windows) {
+    const st = getCaptureWindowStatus(w, now);
+    if (st.status === 'live') {
+      activeWin = w;
+      timeRemaining = st.timeRemainingStr || '';
+      break;
+    } else if (st.status === 'upcoming' && !upcomingWin) {
+      upcomingWin = w;
+    }
+  }
+
+  return {
+    isLive: Boolean(activeWin),
+    activeWindow: activeWin,
+    upcomingWindow: upcomingWin,
+    timeRemainingStr: timeRemaining
+  };
+}
+
+// Helper para atualizar a foto de perfil do usuário
+export async function updateUserProfilePhoto(userId: string, photoURL: string): Promise<void> {
+  const docRef = doc(db, 'users', userId);
+  await updateDoc(docRef, {
+    photoURL: photoURL.trim()
+  });
+}
+
+// Assinar todos os perfis de usuários em tempo real (para rankings e fotos de perfil)
+export function subscribeAllUsers(callback: (users: UserProfile[]) => void) {
+  const q = query(collection(db, 'users'));
+  return onSnapshot(q, (snapshot) => {
+    const list: UserProfile[] = [];
+    snapshot.forEach((doc) => {
+      list.push({ uid: doc.id, ...doc.data() } as UserProfile);
+    });
+    callback(list);
+  }, (error) => {
+    console.error("Erro ao assinar usuários:", error);
+  });
 }
 
 

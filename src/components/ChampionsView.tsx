@@ -79,19 +79,96 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
     });
 
     const ranking = Array.from(userTotals.values()).sort((a, b) => b.bestCatch.length - a.bestCatch.length);
-    const champion = ranking[0] || null;
-    const runnerUp = ranking[1] || null;
-    const thirdPlace = ranking[2] || null;
+    
+    // Check if tournament has explicit official champion crowned
+    let champion = ranking[0] || null;
+    let runnerUp = ranking[1] || null;
+    let thirdPlace = ranking[2] || null;
+
+    if (tourney.championInfo) {
+      champion = {
+        userId: tourney.championInfo.userId || 'official-champ',
+        userName: tourney.championInfo.userName,
+        teamName: tourney.championInfo.teamName,
+        totalLength: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
+        bestCatch: {
+          id: 'champ-catch',
+          userId: tourney.championInfo.userId || 'official-champ',
+          userName: tourney.championInfo.userName,
+          userEmail: tourney.championInfo.userEmail || '',
+          tournamentId: tourney.id,
+          tournamentTitle: tourney.title,
+          species: tourney.championInfo.species || 'Tucunaré',
+          length: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
+          photoUrl: tourney.championInfo.photoUrl || (ranking[0]?.bestCatch.photoUrl || ''),
+          location: '',
+          createdAt: new Date(),
+          status: 'approved',
+          verifiedByAI: false
+        },
+        catchesCount: ranking[0]?.catchesCount || 1
+      };
+    }
+
+    if (tourney.runnerUpInfo) {
+      runnerUp = {
+        userId: tourney.runnerUpInfo.userId || 'official-runnerup',
+        userName: tourney.runnerUpInfo.userName,
+        teamName: tourney.runnerUpInfo.teamName,
+        totalLength: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
+        bestCatch: {
+          id: 'runnerup-catch',
+          userId: tourney.runnerUpInfo.userId || 'official-runnerup',
+          userName: tourney.runnerUpInfo.userName,
+          userEmail: tourney.runnerUpInfo.userEmail || '',
+          tournamentId: tourney.id,
+          tournamentTitle: tourney.title,
+          species: tourney.runnerUpInfo.species || 'Tucunaré',
+          length: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
+          photoUrl: tourney.runnerUpInfo.photoUrl || '',
+          location: '',
+          createdAt: new Date(),
+          status: 'approved',
+          verifiedByAI: false
+        },
+        catchesCount: ranking[1]?.catchesCount || 1
+      };
+    }
+
+    if (tourney.thirdPlaceInfo) {
+      thirdPlace = {
+        userId: tourney.thirdPlaceInfo.userId || 'official-third',
+        userName: tourney.thirdPlaceInfo.userName,
+        teamName: tourney.thirdPlaceInfo.teamName,
+        totalLength: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
+        bestCatch: {
+          id: 'third-catch',
+          userId: tourney.thirdPlaceInfo.userId || 'official-third',
+          userName: tourney.thirdPlaceInfo.userName,
+          userEmail: tourney.thirdPlaceInfo.userEmail || '',
+          tournamentId: tourney.id,
+          tournamentTitle: tourney.title,
+          species: tourney.thirdPlaceInfo.species || 'Tucunaré',
+          length: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
+          photoUrl: tourney.thirdPlaceInfo.photoUrl || '',
+          location: '',
+          createdAt: new Date(),
+          status: 'approved',
+          verifiedByAI: false
+        },
+        catchesCount: ranking[2]?.catchesCount || 1
+      };
+    }
 
     return {
       tournament: tourney,
       champion,
       runnerUp,
       thirdPlace,
-      totalParticipants: ranking.length,
+      totalParticipants: Math.max(ranking.length, tourney.championInfo ? 1 : 0),
       totalFishApproved: tourneyCatches.length
     };
-  }).filter(item => item.champion !== null);
+  }).filter(item => item.champion !== null || item.tournament.championInfo !== undefined);
 
   return (
     <div className="space-y-10 animate-fade-in max-w-6xl mx-auto py-6 sm:py-8">

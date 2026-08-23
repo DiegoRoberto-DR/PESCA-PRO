@@ -35,7 +35,8 @@ import {
   Share2,
   Bell,
   Calendar,
-  Radio
+  Radio,
+  Timer
 } from 'lucide-react';
 import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification } from '../types';
 import { 
@@ -49,7 +50,11 @@ import {
   leaveTeam,
   updateTeam,
   subscribeNotifications,
-  markNotificationAsRead
+  markNotificationAsRead,
+  updateUserProfilePhoto,
+  getTournamentSubmissionDeadline,
+  getCaptureWindowStatus as getCaptureWindowStatusUtil,
+  formatTimeRemainingMs
 } from '../utils/dbHelpers';
 
 interface ProfileViewProps {
@@ -96,6 +101,87 @@ export default function ProfileView({
   const [isTeamLoading, setIsTeamLoading] = useState(false);
   const [copiedTeamCode, setCopiedTeamCode] = useState(false);
   const teamLogoInputRef = useRef<HTMLInputElement>(null);
+
+  // Profile Photo Upload State
+  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+  const [currentPhotoURL, setCurrentPhotoURL] = useState<string>(currentUser.photoURL || '');
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState<boolean>(false);
+  const [photoUploadSuccess, setPhotoUploadSuccess] = useState<string>('');
+  const [photoUploadError, setPhotoUploadError] = useState<string>('');
+
+  useEffect(() => {
+    if (currentUser.photoURL) {
+      setCurrentPhotoURL(currentUser.photoURL);
+    }
+  }, [currentUser.photoURL]);
+
+  const handleProfilePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPhotoUploadError('Selecione um arquivo de imagem válido (JPG, PNG, WEBP).');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setPhotoUploadError('A imagem deve ter menos de 10MB.');
+      return;
+    }
+
+    setPhotoUploadError('');
+    setPhotoUploadSuccess('');
+    setIsUploadingPhoto(true);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const img = new Image();
+          img.src = event.target?.result as string;
+          img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            const MAX_DIM = 400; // Optimal square size for avatars
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+              if (width > MAX_DIM) {
+                height = Math.round((height * MAX_DIM) / width);
+                width = MAX_DIM;
+              }
+            } else {
+              if (height > MAX_DIM) {
+                width = Math.round((width * MAX_DIM) / height);
+                height = MAX_DIM;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+            setCurrentPhotoURL(compressedBase64);
+
+            await updateUserProfilePhoto(currentUser.uid, compressedBase64);
+            setPhotoUploadSuccess('Foto de perfil atualizada com sucesso! Ela será exibida para todos no Ranking.');
+            setTimeout(() => setPhotoUploadSuccess(''), 4000);
+          };
+        } catch (err: any) {
+          console.error("Erro ao processar imagem:", err);
+          setPhotoUploadError('Não foi possível salvar a imagem: ' + (err.message || 'Erro desconhecido'));
+        } finally {
+          setIsUploadingPhoto(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setIsUploadingPhoto(false);
+      setPhotoUploadError('Erro ao carregar arquivo.');
+    }
+  };
 
   // Subscribe to codes assigned to current user
   useEffect(() => {
@@ -154,6 +240,13 @@ export default function ProfileView({
     return Boolean(isEnrolled || hasCatchInTournament);
   });
 
+  // Live ticking clock for real-time validation and countdowns
+  const [now, setNow] = useState<Date>(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Filter notifications relevant to user's enrolled tournaments or general
   const userTourneyIds = (currentUser.enrolledTournaments || []).concat(participatingTournaments.map(t => t.id));
   const relevantNotifications = notifications.filter(n => {
@@ -177,28 +270,33 @@ export default function ProfileView({
     }
   });
 
-  // Helper to determine capture window status relative to now
+  // Helper to determine capture window status relative to now using centralized helper
   const getCaptureWindowStatus = (win: CaptureWindow) => {
-    if (!win.date) return { status: 'scheduled', label: 'Agendada', badgeClass: 'bg-slate-800 text-slate-400 border-slate-700' };
-    try {
-      const now = new Date();
-      const [year, month, day] = win.date.split('-').map(Number);
-      const [startH, startM] = (win.startTime || '00:00').split(':').map(Number);
-      const [endH, endM] = (win.endTime || '23:59').split(':').map(Number);
-
-      const startDate = new Date(year, month - 1, day, startH, startM, 0);
-      const endDate = new Date(year, month - 1, day, endH, endM, 59);
-
-      if (now < startDate) {
-        return { status: 'upcoming', label: 'Em Breve', badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30' };
-      } else if (now >= startDate && now <= endDate) {
-        return { status: 'active', label: 'Janela Aberta Agora', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse' };
-      } else {
-        return { status: 'ended', label: 'Encerrada', badgeClass: 'bg-slate-800/80 text-slate-500 border-slate-800' };
-      }
-    } catch {
-      return { status: 'scheduled', label: 'Agendada', badgeClass: 'bg-slate-800 text-slate-400 border-slate-700' };
+    const st = getCaptureWindowStatusUtil(win, now);
+    if (st.status === 'live') {
+      return { 
+        status: 'active', 
+        label: 'Janela Aberta Agora', 
+        badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse',
+        timeRemainingStr: st.timeRemainingStr,
+        isLive: true
+      };
     }
+    if (st.status === 'upcoming') {
+      return { 
+        status: 'upcoming', 
+        label: `Abre em ${st.opensInStr || 'Breve'}`, 
+        badgeClass: 'bg-sky-500/15 text-sky-400 border-sky-500/30',
+        opensInStr: st.opensInStr,
+        isLive: false
+      };
+    }
+    return { 
+      status: 'ended', 
+      label: 'Encerrada', 
+      badgeClass: 'bg-rose-950/40 text-rose-400 border-rose-800/60',
+      isLive: false
+    };
   };
 
   const handleMarkNotificationRead = async (notifId: string) => {
@@ -430,6 +528,22 @@ export default function ProfileView({
       setErrorMsg('Por favor, selecione um torneio.');
       return;
     }
+
+    const currentTournament = tournaments.find(t => t.id === selectedTournamentId);
+    if (!currentTournament) {
+      setErrorMsg('Torneio selecionado não encontrado.');
+      return;
+    }
+
+    // =========================================================================
+    // DEADLINE & CAPTURE WINDOW VALIDATION (ADMIN SCHEDULE ENFORCEMENT)
+    // =========================================================================
+    const deadlineValidation = getTournamentSubmissionDeadline(currentTournament, new Date());
+    if (!deadlineValidation.canSubmit) {
+      setErrorMsg(deadlineValidation.message || '🚫 Não é mais possível enviar capturas para avaliação deste campeonato.');
+      return;
+    }
+
     if (!species.trim()) {
       setErrorMsg('Por favor, informe a espécie do peixe.');
       return;
@@ -449,8 +563,6 @@ export default function ProfileView({
       setErrorMsg('Por favor, insira a URL da foto da medição ou faça o upload de uma imagem.');
       return;
     }
-
-    const currentTournament = tournaments.find(t => t.id === selectedTournamentId);
 
     // =========================================================================
     // TEAM VALIDATION RULE FOR SUBMISSIONS
@@ -489,6 +601,10 @@ export default function ProfileView({
         photoUrl: finalPhoto,
         videoStartUrl: videoStartUrl.trim() || undefined,
         videoEndUrl: videoEndUrl.trim() || undefined,
+        isWithinWindow: deadlineValidation.canSubmit,
+        captureWindowId: deadlineValidation.activeWindow?.id,
+        captureWindowName: deadlineValidation.activeWindow?.name,
+        captureWindowSecret: deadlineValidation.activeWindow?.secret,
         verifiedByAI: false
       });
 
@@ -520,18 +636,45 @@ export default function ProfileView({
       {/* Profile Navigation Bar */}
       <div className="bg-[#121316] border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-lg shrink-0 overflow-hidden">
-            {currentUser.photoURL ? (
-              <img 
-                src={currentUser.photoURL} 
-                alt={currentUser.displayName} 
-                referrerPolicy="no-referrer"
-                className="w-full h-full rounded-2xl object-cover"
-              />
-            ) : (
-              currentUser.displayName.charAt(0).toUpperCase()
+          {/* Clickable Profile Photo with upload trigger */}
+          <div className="relative group shrink-0">
+            <input 
+              type="file" 
+              ref={profilePhotoInputRef} 
+              onChange={handleProfilePhotoChange} 
+              accept="image/*" 
+              className="hidden" 
+            />
+            <div 
+              onClick={() => profilePhotoInputRef.current?.click()}
+              className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 border-2 border-emerald-500/30 flex items-center justify-center font-bold text-xl shrink-0 overflow-hidden cursor-pointer hover:border-emerald-400 transition shadow-md relative"
+              title="Clique para trocar sua foto de perfil"
+            >
+              {currentPhotoURL ? (
+                <img 
+                  src={currentPhotoURL} 
+                  alt={currentUser.displayName} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                currentUser.displayName.charAt(0).toUpperCase()
+              )}
+
+              {/* Hover overlay icon */}
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white">
+                <Upload className="h-4 w-4 text-emerald-400" />
+                <span className="text-[8px] font-bold uppercase mt-0.5">Mudar</span>
+              </div>
+            </div>
+
+            {isUploadingPhoto && (
+              <div className="absolute -bottom-1 -right-1 bg-sky-500 text-slate-950 p-1 rounded-full shadow">
+                <Clock className="h-3 w-3 animate-spin" />
+              </div>
             )}
           </div>
+
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black text-white uppercase tracking-tight">
@@ -547,6 +690,12 @@ export default function ProfileView({
               {currentUser.email} {currentUser.cpf ? `• CPF: ${currentUser.cpf}` : ''}
               {userTeam && ` • Equipe: ${userTeam.name}`}
             </p>
+            <button 
+              onClick={() => profilePhotoInputRef.current?.click()}
+              className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 mt-0.5 cursor-pointer underline underline-offset-2"
+            >
+              <span>📷 Alterar Foto de Perfil</span>
+            </button>
           </div>
         </div>
 
@@ -780,6 +929,63 @@ export default function ProfileView({
 
           {/* Right: Anti-fraud Explanation & Security Card */}
           <div className="lg:col-span-5 space-y-6">
+            {/* Foto de Perfil Card */}
+            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-5">
+              <div className="flex items-center gap-2.5 text-emerald-400">
+                <ImageIcon className="h-6 w-6" />
+                <div>
+                  <h4 className="text-base font-black text-white uppercase">Foto de Perfil do Competidor</h4>
+                  <p className="text-xs text-slate-400">Sua foto aparecerá nos rankings oficiais e pódios</p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-4 bg-[#1a1c20] p-4 rounded-2xl border border-slate-800">
+                <div className="relative group shrink-0">
+                  <div className="w-20 h-20 rounded-2xl bg-slate-900 border-2 border-emerald-500/30 flex items-center justify-center font-black text-2xl text-emerald-400 overflow-hidden shadow-md">
+                    {currentPhotoURL ? (
+                      <img
+                        src={currentPhotoURL}
+                        alt="Foto de perfil"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      currentUser.displayName.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-center sm:text-left flex-1">
+                  <p className="text-xs text-slate-300">
+                    Selecione uma foto sua segurando um peixe ou sua foto de pescador.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => profilePhotoInputRef.current?.click()}
+                    disabled={isUploadingPhoto}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md mx-auto sm:mx-0"
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span>{isUploadingPhoto ? 'Enviando...' : 'Buscar Foto no Dispositivo'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {photoUploadSuccess && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <span>{photoUploadSuccess}</span>
+                </div>
+              )}
+
+              {photoUploadError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  <span>{photoUploadError}</span>
+                </div>
+              )}
+            </div>
+
             <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
               <div className="flex items-center gap-2.5 text-emerald-400">
                 <ShieldCheck className="h-6 w-6" />
@@ -1574,18 +1780,30 @@ export default function ProfileView({
                           </p>
                         )}
 
-                        {/* Action: Jump to Submit Catch */}
+                        {/* Action: Jump to Submit Catch or show status */}
                         <div className="flex justify-end pt-1">
-                          <button
-                            onClick={() => {
-                              if (win.tournamentId) setSelectedTournamentId(win.tournamentId);
-                              setActiveTab('submit');
-                            }}
-                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
-                          >
-                            <Send className="h-3.5 w-3.5" />
-                            <span>Enviar Captura Nesta Fase</span>
-                          </button>
+                          {statusInfo.status === 'active' ? (
+                            <button
+                              onClick={() => {
+                                if (win.tournamentId) setSelectedTournamentId(win.tournamentId);
+                                setActiveTab('submit');
+                              }}
+                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                              <span>Enviar Captura Nesta Fase</span>
+                            </button>
+                          ) : statusInfo.status === 'upcoming' ? (
+                            <div className="px-4 py-2 bg-slate-800/60 text-sky-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5 cursor-not-allowed">
+                              <Clock className="h-3.5 w-3.5 text-sky-400" />
+                              <span>Aguardando Abertura ({statusInfo.opensInStr || 'Em Breve'})</span>
+                            </div>
+                          ) : (
+                            <div className="px-4 py-2 bg-rose-950/30 text-rose-400 font-bold text-xs rounded-xl border border-rose-800/40 flex items-center gap-1.5 cursor-not-allowed">
+                              <Lock className="h-3.5 w-3.5 text-rose-400" />
+                              <span>Etapa Encerrada - Envios Bloqueados</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1635,6 +1853,40 @@ export default function ProfileView({
                         {notif.message}
                       </p>
 
+                      {/* Highlighted Keyword Box in Notification */}
+                      {notif.windowSecret && (
+                        <div className="bg-[#181a1e] border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                          <div className="space-y-0.5">
+                            <span className="text-[9px] font-mono uppercase text-amber-400 font-bold block">
+                              Palavra-Chave da Etapa:
+                            </span>
+                            <span className="text-xs sm:text-sm font-mono font-black text-amber-300 tracking-wider">
+                              {notif.windowSecret}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(notif.windowSecret || '');
+                              setCopiedWindowSecretId(notif.id || notif.windowSecret);
+                              setTimeout(() => setCopiedWindowSecretId(null), 2500);
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] rounded-lg border border-amber-500/30 transition cursor-pointer flex items-center gap-1 shrink-0"
+                          >
+                            {copiedWindowSecretId === (notif.id || notif.windowSecret) ? (
+                              <>
+                                <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                                <span>Copiada!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" />
+                                <span>Copiar</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500 font-mono">
                         <span>{notif.createdAt ? new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                         {!notif.isRead && (
@@ -1658,206 +1910,329 @@ export default function ProfileView({
       {/* ========================================================================= */}
       {/* TAB 4: ENVIAR CAPTURA */}
       {/* ========================================================================= */}
-      {activeTab === 'submit' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
-          {/* Left Column: Form "ENVIAR CAPTURA" */}
-          <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-            <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight mb-5">
-              ENVIAR CAPTURA PARA MODERAÇÃO
-            </h2>
+      {activeTab === 'submit' && (() => {
+        const currentSelectedTournament = tournaments.find(t => t.id === selectedTournamentId);
+        const currentDeadline = getTournamentSubmissionDeadline(currentSelectedTournament, now);
 
-            {/* Error & Success Feedback Alerts */}
-            {errorMsg && (
-              <div className="mb-4 p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            {successMsg && (
-              <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span>{successMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleFormSubmit} className="space-y-3.5">
-              {/* 1. Selecionar Torneio Dropdown */}
-              <div className="space-y-2">
-                <select
-                  value={selectedTournamentId}
-                  onChange={(e) => setSelectedTournamentId(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none transition cursor-pointer appearance-none disabled:opacity-50"
-                  required
-                  disabled={participatingTournaments.length === 0}
-                >
-                  {participatingTournaments.length === 0 ? (
-                    <option value="" disabled className="text-slate-500 bg-[#1b1e22]">
-                      Nenhum campeonato inscrito
-                    </option>
-                  ) : (
-                    <>
-                      <option value="" disabled className="text-slate-500 bg-[#1b1e22]">
-                        Selecionar Torneio ({participatingTournaments.length} inscrito{participatingTournaments.length > 1 ? 's' : ''})
-                      </option>
-                      {participatingTournaments.map((t) => (
-                        <option key={t.id} value={t.id} className="bg-[#1b1e22] text-white">
-                          {t.title} ({t.teamFormat ? t.teamFormat.toUpperCase() : 'SOLO'}) {t.status === 'completed' ? '(Encerrado)' : ''}
-                        </option>
-                      ))}
-                    </>
-                  )}
-                </select>
-
-                {/* Helpful notice if user is not in any tournament yet */}
-                {participatingTournaments.length === 0 && (
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-center justify-between gap-3">
-                    <span className="leading-tight">
-                      Você ainda não está inscrito em nenhum torneio. Ative um código de participação na aba "Códigos de Inscrição".
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('codes')}
-                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
-                    >
-                      Ver Códigos
-                    </button>
-                  </div>
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
+            {/* Left Column: Form "ENVIAR CAPTURA" */}
+            <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight">
+                  ENVIAR CAPTURA PARA MODERAÇÃO
+                </h2>
+                {currentDeadline.status === 'open_live' && (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-500 text-slate-950 animate-pulse">
+                    🔴 PROVA AO VIVO
+                  </span>
                 )}
               </div>
 
-              {/* Team info badge for this tournament */}
-              {userTeam && (
-                <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <Users className="h-4 w-4 text-emerald-400" />
-                    <span>Equipe vinculada: <strong>{userTeam.name}</strong> ({userTeam.members?.length}/{userTeam.maxMembers} membros)</span>
-                  </div>
-                  <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
-                    isTeamComplete ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                  }`}>
-                    {isTeamComplete ? '🟢 Equipe Completa' : '⚠️ Equipe Incompleta'}
-                  </span>
+              {/* Error & Success Feedback Alerts */}
+              {errorMsg && (
+                <div className="mb-4 p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-xl text-xs flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{errorMsg}</span>
                 </div>
               )}
 
-              {/* 2. Espécie */}
-              <div>
-                <input
-                  type="text"
-                  placeholder="Espécie (Ex: Tucunaré Azul, Traíra, Dourado)"
-                  value={species}
-                  onChange={(e) => setSpecies(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
-                  required
-                />
-              </div>
+              {successMsg && (
+                <div className="mb-4 p-3.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>{successMsg}</span>
+                </div>
+              )}
 
-              {/* 3. Local da Captura */}
-              <div>
-                <input
-                  type="text"
-                  placeholder="Local da Captura (Ex: Represa de Furnas - MG)"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
-                  required
-                />
-              </div>
+              {/* SUBMISSION DEADLINE STATUS CARD */}
+              {currentSelectedTournament && (
+                <>
+                  {!currentDeadline.canSubmit ? (
+                    <div className={`p-4 sm:p-5 rounded-2xl border-2 space-y-2.5 mb-5 shadow-lg ${
+                      currentDeadline.status === 'tournament_completed'
+                        ? 'bg-rose-950/50 border-rose-600/60 text-rose-200'
+                        : currentDeadline.status === 'window_expired'
+                        ? 'bg-rose-950/50 border-rose-600/60 text-rose-200'
+                        : 'bg-amber-950/50 border-amber-600/60 text-amber-200'
+                    }`}>
+                      <div className="flex items-center space-x-2 text-rose-400 font-bold">
+                        <Lock className="h-5 w-5 shrink-0" />
+                        <span className="text-sm font-black uppercase tracking-wider font-mono">
+                          {currentDeadline.status === 'tournament_completed' && 'CAMPEONATO OFICIALMENTE ENCERRADO'}
+                          {currentDeadline.status === 'window_expired' && 'JANELA DE CAPTURA ENCERRADA (PRAZO FINALIZADO)'}
+                          {currentDeadline.status === 'window_upcoming' && 'JANELA DE CAPTURA AINDA NÃO INICIADA'}
+                          {currentDeadline.status === 'tournament_upcoming' && 'CAMPEONATO EM BREVE'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-200 leading-relaxed font-sans font-medium">
+                        {currentDeadline.message}
+                      </p>
+                      <div className="text-[11px] text-slate-300 font-mono flex items-center gap-1.5 pt-1.5 border-t border-rose-800/40">
+                        <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                        <span>O envio de capturas para avaliação está bloqueado de acordo com as regras e horários definidos pelo Administrador.</span>
+                      </div>
+                    </div>
+                  ) : currentDeadline.status === 'open_live' ? (
+                    <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-950/80 via-slate-900 to-slate-950 border-2 border-emerald-500/50 rounded-2xl space-y-3 mb-5 shadow-xl">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-900/40 pb-3">
+                        <div className="flex items-center space-x-2">
+                          <span className="h-3 w-3 rounded-full bg-emerald-400 animate-ping"></span>
+                          <span className="text-xs font-black uppercase tracking-wider font-mono text-emerald-400">
+                            🔴 PROVA AO VIVO: {currentDeadline.activeWindow?.name || currentSelectedTournament?.title}
+                          </span>
+                        </div>
+                        {currentDeadline.remainingFormatted && (
+                          <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-emerald-600/40 shadow-inner">
+                            <Timer className="h-4 w-4 text-amber-400 animate-pulse" />
+                            <span className="text-[11px] font-mono text-slate-400 uppercase">Tempo Restante:</span>
+                            <span className="text-sm font-black text-amber-300 font-mono tracking-wider">
+                              {currentDeadline.remainingFormatted}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {currentDeadline.activeWindow?.secret && (
+                        <div className="p-3 bg-slate-950/80 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-2">
+                          <div>
+                            <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold block">
+                              Chave Antifraude Desta Janela (Obrigatória no Vídeo/Foto):
+                            </span>
+                            <span className="text-sm font-mono font-black text-amber-400 tracking-widest">
+                              {currentDeadline.activeWindow.secret}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(currentDeadline.activeWindow?.secret || '');
+                              setCopiedWindowSecretId('live-window');
+                              setTimeout(() => setCopiedWindowSecretId(null), 2500);
+                            }}
+                            className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold text-xs rounded-lg border border-emerald-500/40 transition cursor-pointer flex items-center gap-1 shrink-0"
+                          >
+                            {copiedWindowSecretId === 'live-window' ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                            <span>{copiedWindowSecretId === 'live-window' ? 'Copiada!' : 'Copiar'}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              )}
 
-              {/* 4. Comprimento (cm) */}
-              <div>
-                <input
-                  type="number"
-                  step="0.5"
-                  min="1"
-                  placeholder="Comprimento em cm (Ex: 58.5)"
-                  value={length}
-                  onChange={(e) => setLength(e.target.value)}
-                  className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
-                  required
-                />
-              </div>
+              <form onSubmit={handleFormSubmit} className="space-y-3.5">
+                {/* 1. Selecionar Torneio Dropdown */}
+                <div className="space-y-2">
+                  <select
+                    value={selectedTournamentId}
+                    onChange={(e) => setSelectedTournamentId(e.target.value)}
+                    className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none transition cursor-pointer appearance-none disabled:opacity-50"
+                    required
+                    disabled={participatingTournaments.length === 0}
+                  >
+                    {participatingTournaments.length === 0 ? (
+                      <option value="" disabled className="text-slate-500 bg-[#1b1e22]">
+                        Nenhum campeonato inscrito
+                      </option>
+                    ) : (
+                      <>
+                        <option value="" disabled className="text-slate-500 bg-[#1b1e22]">
+                          Selecionar Torneio ({participatingTournaments.length} inscrito{participatingTournaments.length > 1 ? 's' : ''})
+                        </option>
+                        {participatingTournaments.map((t) => {
+                          const tDeadline = getTournamentSubmissionDeadline(t, now);
+                          const prefix = tDeadline.status === 'open_live' 
+                            ? '🟢 [AO VIVO] ' 
+                            : t.status === 'completed' || tDeadline.status === 'tournament_completed' 
+                            ? '🔒 [ENCERRADO] ' 
+                            : tDeadline.status === 'window_expired' 
+                            ? '🚫 [JANELA ENCERRADA] ' 
+                            : tDeadline.status === 'window_upcoming' 
+                            ? '⏳ [EM BREVE] ' 
+                            : '🏆 ';
+                          return (
+                            <option key={t.id} value={t.id} className="bg-[#1b1e22] text-white">
+                              {prefix}{t.title} ({t.teamFormat ? t.teamFormat.toUpperCase() : 'SOLO'})
+                            </option>
+                          );
+                        })}
+                      </>
+                    )}
+                  </select>
 
-              {/* 5. Foto da Captura com Régua */}
-              <div className="space-y-2 pt-1">
-                <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
-                  Foto da Medição com Régua / Fita Métrica Oficial *
-                </label>
-
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="url"
-                    placeholder="URL da Foto ou faça o upload abaixo"
-                    value={photoUrl}
-                    onChange={(e) => {
-                      setPhotoUrl(e.target.value);
-                      if (e.target.value) setPhotoBase64('');
-                    }}
-                    className="flex-1 bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition"
-                  />
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept="image/*"
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer shrink-0"
-                    >
-                      <Upload className="h-4 w-4 text-emerald-400" />
-                      <span>Upload Foto</span>
-                    </button>
-                  </div>
+                  {/* Helpful notice if user is not in any tournament yet */}
+                  {participatingTournaments.length === 0 && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 flex items-center justify-between gap-3">
+                      <span className="leading-tight">
+                        Você ainda não está inscrito em nenhum torneio. Ative um código de participação na aba "Códigos de Inscrição".
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('codes')}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider shrink-0 cursor-pointer shadow-sm"
+                      >
+                        Ver Códigos
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {photoBase64 && (
-                  <div className="mt-2 relative w-full h-32 rounded-xl overflow-hidden border border-slate-800 bg-black/40">
-                    <img 
-                      src={photoBase64} 
-                      alt="Preview Captura" 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-contain"
-                    />
+                {/* Team info badge for this tournament */}
+                {userTeam && (
+                  <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-slate-300">
+                      <Users className="h-4 w-4 text-emerald-400" />
+                      <span>Equipe vinculada: <strong>{userTeam.name}</strong> ({userTeam.members?.length}/{userTeam.maxMembers} membros)</span>
+                    </div>
+                    <span className={`text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded ${
+                      isTeamComplete ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    }`}>
+                      {isTeamComplete ? '🟢 Equipe Completa' : '⚠️ Equipe Incompleta'}
+                    </span>
                   </div>
                 )}
-              </div>
 
-              {/* 6. URLs de Vídeo (Opcionais) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <input
-                  type="url"
-                  placeholder="URL Vídeo Início / Fisgada (Opcional)"
-                  value={videoStartUrl}
-                  onChange={(e) => setVideoStartUrl(e.target.value)}
-                  className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition"
-                />
+                {/* 2. Espécie */}
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Espécie (Ex: Tucunaré Azul, Traíra, Dourado)"
+                    value={species}
+                    onChange={(e) => setSpecies(e.target.value)}
+                    disabled={!currentDeadline.canSubmit}
+                    className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    required
+                  />
+                </div>
 
-                <input
-                  type="url"
-                  placeholder="URL Vídeo Final / Soltura (Opcional)"
-                  value={videoEndUrl}
-                  onChange={(e) => setVideoEndUrl(e.target.value)}
-                  className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition"
-                />
-              </div>
+                {/* 3. Local da Captura */}
+                <div>
+                  <input
+                    type="text"
+                    placeholder="Local da Captura (Ex: Represa de Furnas - MG)"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    disabled={!currentDeadline.canSubmit}
+                    className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    required
+                  />
+                </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting || participatingTournaments.length === 0}
-                className="w-full py-4 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60 disabled:opacity-50 mt-4"
-              >
-                {isSubmitting ? 'Enviando Captura...' : 'Submeter Captura para Arbitragem'}
-              </button>
-            </form>
-          </div>
+                {/* 4. Comprimento (cm) */}
+                <div>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1"
+                    placeholder="Comprimento em cm (Ex: 58.5)"
+                    value={length}
+                    onChange={(e) => setLength(e.target.value)}
+                    disabled={!currentDeadline.canSubmit}
+                    className="w-full bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3.5 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    required
+                  />
+                </div>
 
-          {/* Right Column: Submission Guidelines */}
+                {/* 5. Foto da Captura com Régua */}
+                <div className="space-y-2 pt-1">
+                  <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                    Foto da Medição com Régua / Fita Métrica Oficial *
+                  </label>
+
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="url"
+                      placeholder="URL da Foto ou faça o upload abaixo"
+                      value={photoUrl}
+                      onChange={(e) => {
+                        setPhotoUrl(e.target.value);
+                        if (e.target.value) setPhotoBase64('');
+                      }}
+                      disabled={!currentDeadline.canSubmit}
+                      className="flex-1 bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        accept="image/*"
+                        disabled={!currentDeadline.canSubmit}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={!currentDeadline.canSubmit}
+                        className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Upload className="h-4 w-4 text-emerald-400" />
+                        <span>Upload Foto</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {photoBase64 && (
+                    <div className="mt-2 relative w-full h-32 rounded-xl overflow-hidden border border-slate-800 bg-black/40">
+                      <img 
+                        src={photoBase64} 
+                        alt="Preview Captura" 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. URLs de Vídeo (Opcionais) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <input
+                    type="url"
+                    placeholder="URL Vídeo Início / Fisgada (Opcional)"
+                    value={videoStartUrl}
+                    onChange={(e) => setVideoStartUrl(e.target.value)}
+                    disabled={!currentDeadline.canSubmit}
+                    className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
+
+                  <input
+                    type="url"
+                    placeholder="URL Vídeo Final / Soltura (Opcional)"
+                    value={videoEndUrl}
+                    onChange={(e) => setVideoEndUrl(e.target.value)}
+                    disabled={!currentDeadline.canSubmit}
+                    className="bg-[#1b1e22] border border-slate-800/90 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs placeholder:text-slate-500 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !currentDeadline.canSubmit || participatingTournaments.length === 0}
+                  className={`w-full py-4 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg mt-4 flex items-center justify-center gap-2 ${
+                    !currentDeadline.canSubmit
+                      ? 'bg-slate-800/80 text-slate-500 border border-slate-700 cursor-not-allowed shadow-none'
+                      : 'bg-[#00c853] hover:bg-[#00e676] text-slate-950 shadow-emerald-950/60'
+                  }`}
+                >
+                  {!currentDeadline.canSubmit ? (
+                    <>
+                      <Lock className="h-4 w-4 text-slate-500" />
+                      <span>🚫 Envios Bloqueados - {currentDeadline.title}</span>
+                    </>
+                  ) : isSubmitting ? (
+                    <span>Enviando Captura...</span>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 text-slate-950" />
+                      <span>Submeter Captura para Arbitragem</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Right Column: Submission Guidelines */}
           <div className="lg:col-span-4 space-y-6">
             <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
               <div className="flex items-center gap-2 text-emerald-400">
@@ -1886,7 +2261,8 @@ export default function ProfileView({
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
 
       {/* ========================================================================= */}
       {/* TAB 5: MINHAS CAPTURAS */}

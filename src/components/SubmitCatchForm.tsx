@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Trophy, 
   Upload, 
@@ -13,10 +13,23 @@ import {
   RefreshCw,
   X,
   Plus,
-  Key
+  Key,
+  Radio,
+  Clock,
+  Mic,
+  AlertTriangle,
+  Lock,
+  Timer
 } from 'lucide-react';
 import { Tournament, Catch, UserProfile, Team } from '../types';
-import { submitCatch, subscribeUserTeam } from '../utils/dbHelpers';
+import { 
+  submitCatch, 
+  subscribeUserTeam, 
+  getTournamentLiveStatus, 
+  getTournamentSubmissionDeadline,
+  formatExactDateTime, 
+  cleanFirestoreData 
+} from '../utils/dbHelpers';
 
 interface SubmitCatchFormProps {
   tournaments: Tournament[];
@@ -36,10 +49,24 @@ export default function SubmitCatchForm({
   const activeTournaments = tournaments.filter(t => t.status === 'active');
   
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(
-    initialTournament?.id || activeTournaments[0]?.id || ''
+    initialTournament?.id || activeTournaments[0]?.id || tournaments[0]?.id || ''
   );
   
   const currentTournament = tournaments.find(t => t.id === selectedTournamentId);
+
+  // Real-time ticking clock for exact 24h countdown
+  const [now, setNow] = useState<Date>(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const submissionStatus = getTournamentSubmissionDeadline(currentTournament, now);
+  const liveInfo = currentTournament ? getTournamentLiveStatus(currentTournament, now) : { isLive: false, activeWindow: null, upcomingWindow: null, timeRemainingStr: '' };
+  const hasConfiguredWindows = Boolean(currentTournament?.captureWindows && currentTournament.captureWindows.length > 0);
+  const isWeightMetric = currentTournament?.metric === 'weight' || currentTournament?.metric === 'both';
 
   // Form states
   const [species, setSpecies] = useState<string>('');
@@ -207,15 +234,26 @@ export default function SubmitCatchForm({
     setFormError('');
 
     if (!selectedTournamentId) {
-      setFormError('Selecione um campeonato ativo.');
+      setFormError('Selecione um campeonato.');
       return;
     }
+
+    // Strict 24h and tournament completion validation
+    if (!submissionStatus.canSubmit) {
+      setFormError(submissionStatus.message || 'Envio bloqueado: Este campeonato está encerrado ou fora do prazo de 24 horas.');
+      return;
+    }
+
     if (!species.trim()) {
       setFormError('Informe a espécie do peixe capturado.');
       return;
     }
     if (!length || parseFloat(length) <= 0) {
       setFormError('Informe um comprimento válido em cm.');
+      return;
+    }
+    if (isWeightMetric && (!weight || parseFloat(weight) <= 0)) {
+      setFormError('Este campeonato avalia por Kilo (peso). Informe o peso do peixe em kg.');
       return;
     }
     if (!location.trim()) {
@@ -257,30 +295,50 @@ export default function SubmitCatchForm({
     setIsSubmitting(true);
 
     try {
-      // Setup payload matching interface
-      const payload: Omit<Catch, 'id' | 'createdAt' | 'status' | 'likes' | 'comments'> = {
+      const exactTimeStr = formatExactDateTime(now);
+      const secretToSpeak = submissionStatus.activeWindow?.secret || currentTournament?.keyword || 'PESCA2026';
+
+      // Setup payload cleanly without undefined keys
+      const payload: Record<string, any> = {
         tournamentId: selectedTournamentId,
         tournamentTitle: currentTournament?.title || 'Torneio',
         userId: currentUser.uid,
-        userName: currentUser.displayName,
-        userEmail: currentUser.email,
-        teamId: userTeam?.id,
-        teamName: userTeam?.name,
-        teamLogo: userTeam?.logoUrl,
+        userName: currentUser.displayName || 'Pescador',
+        userEmail: currentUser.email || '',
         species: species.trim(),
         length: parseFloat(length),
-        weight: weight ? parseFloat(weight) : undefined,
         location: location.trim(),
         photoUrl: photoBase64,
-        verifiedByAI: aiFeedback !== null,
-        aiFeedback: aiFeedback || undefined
+        submittedAtFormatted: exactTimeStr,
+        submittedTimestamp: now.getTime(),
+        isWithinWindow: submissionStatus.canSubmit,
+        verifiedByAI: aiFeedback !== null
       };
 
-      await submitCatch(payload);
+      if (weight && !isNaN(parseFloat(weight))) {
+        payload.weight = parseFloat(weight);
+      }
+      if (userTeam?.id) {
+        payload.teamId = userTeam.id;
+        payload.teamName = userTeam.name || '';
+        if (userTeam.logoUrl) payload.teamLogo = userTeam.logoUrl;
+      }
+      if (submissionStatus.activeWindow?.id) {
+        payload.captureWindowId = submissionStatus.activeWindow.id;
+        payload.captureWindowName = submissionStatus.activeWindow.name || '';
+      }
+      if (secretToSpeak) {
+        payload.captureWindowSecret = secretToSpeak;
+      }
+      if (aiFeedback) {
+        payload.aiFeedback = aiFeedback;
+      }
+
+      await submitCatch(payload as any);
       onSuccess();
     } catch (err: any) {
-      console.error(err);
-      setFormError('Ocorreu um erro ao salvar sua submissão. Tente novamente.');
+      console.error("Erro ao submeter captura:", err);
+      setFormError(err.message || 'Ocorreu um erro ao salvar sua submissão. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -294,7 +352,7 @@ export default function SubmitCatchForm({
             <Trophy className="h-6 w-6 text-sky-400" />
             <span>Enviar Nova Captura</span>
           </h2>
-          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">Qualquer lugar do Brasil. Envie fita de medição visível.</p>
+          <p className="text-slate-400 text-xs sm:text-sm mt-0.5">Envio com validação de horário e prazo regulamentar de 24 horas.</p>
         </div>
         <button 
           onClick={onCancel}
@@ -314,7 +372,14 @@ export default function SubmitCatchForm({
 
         {/* Tournament Selection */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider">Campeonato Ativo</label>
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider">Campeonato Oficial</label>
+            {liveInfo.isLive && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white animate-pulse">
+                🔴 PROVA AO VIVO AGORA
+              </span>
+            )}
+          </div>
           <select
             value={selectedTournamentId}
             onChange={(e) => {
@@ -323,36 +388,112 @@ export default function SubmitCatchForm({
             }}
             className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-sky-500 text-xs sm:text-sm cursor-pointer"
           >
-            {activeTournaments.length === 0 && (
-              <option disabled>Nenhum campeonato ativo no momento</option>
+            {tournaments.length === 0 && (
+              <option disabled>Nenhum campeonato cadastrado</option>
             )}
-            {activeTournaments.map((t) => (
-              <option key={t.id} value={t.id}>
-                🏆 {t.title} (Até {t.endDate.split('-')[2]}/{t.endDate.split('-')[1]})
-              </option>
-            ))}
+            {tournaments.map((t) => {
+              const live = getTournamentLiveStatus(t, now);
+              const isClosed = t.status === 'completed';
+              return (
+                <option key={t.id} value={t.id}>
+                  {live.isLive ? '🔴 [AO VIVO AGORA] ' : isClosed ? '🔒 [ENCERRADO] ' : '🏆 '} 
+                  {t.title} {isClosed ? '(Finalizado)' : `(Até ${t.endDate ? t.endDate.split('-')[2] + '/' + t.endDate.split('-')[1] : ''})`}
+                </option>
+              );
+            })}
           </select>
         </div>
 
-        {/* Anti-fraud Keyword Warning Panel */}
+        {/* 24-HOUR COUNTDOWN & STATUS CARD */}
         {currentTournament && (
-          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
-            <div className="flex items-center space-x-2 text-amber-400">
-              <Key className="h-4 w-4 stroke-[2.2]" />
-              <span className="text-xs font-bold uppercase tracking-wider font-mono">Palavra-Chave Antifraude Exigida</span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Para comprovar que a captura foi feita hoje ou durante o torneio (evitando envio de fotos antigas), você deve tirar a foto do peixe deitado de forma que apareça uma folha, papel ou placa escrita de forma bem visível a palavra-chave oficial do campeonato:
-            </p>
-            <div className="flex items-center space-x-3.5 mt-2 bg-slate-950 p-2.5 rounded-xl border border-amber-500/20 w-fit">
-              <span className="text-[10px] text-slate-500 font-mono uppercase">PALAVRA-CHAVE ATIVA:</span>
-              <span className="font-extrabold text-amber-450 font-mono text-sm tracking-wider uppercase px-2 py-0.5 bg-amber-500/10 rounded">
-                {currentTournament.keyword || "PESCA2026"}
-              </span>
-            </div>
-            <p className="text-[10px] text-amber-500/80 italic">
-              🚨 Importante: Os juízes de validação reprovarão qualquer peixe homologado sem esta palavra explicita e legível na foto.
-            </p>
+          <div className="space-y-3">
+            {/* Status 1: Completed */}
+            {submissionStatus.status === 'tournament_completed' && (
+              <div className="p-4 sm:p-5 bg-rose-950/40 border-2 border-rose-600/50 rounded-2xl space-y-2">
+                <div className="flex items-center space-x-2 text-rose-400 font-bold">
+                  <Lock className="h-5 w-5" />
+                  <span className="text-sm font-black uppercase tracking-wider font-mono">CAMPEONATO OFICIALMENTE ENCERRADO</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Este campeonato foi concluído e os campeões já foram declarados. Não é mais permitido enviar novas capturas para avaliação dos juízes.
+                </p>
+              </div>
+            )}
+
+            {/* Status 2: Active Live Window */}
+            {submissionStatus.status === 'open_live' && (
+              <div className="p-4 sm:p-5 rounded-2xl border-2 space-y-4 shadow-xl bg-gradient-to-r from-emerald-950/80 via-slate-900 to-slate-950 border-emerald-500/50">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex items-center space-x-2">
+                    <span className="h-3 w-3 rounded-full animate-ping bg-emerald-400"></span>
+                    <span className="text-xs font-black uppercase tracking-wider font-mono text-emerald-400">
+                      🔴 PROVA AO VIVO: {submissionStatus.activeWindow?.name || 'Etapa Oficial'}
+                    </span>
+                  </div>
+
+                  {/* COUNTDOWN CLOCK */}
+                  <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 shadow-inner">
+                    <Timer className="h-4 w-4 text-amber-400 animate-pulse" />
+                    <span className="text-[11px] font-mono text-slate-400 uppercase">Tempo Restante:</span>
+                    <span className="text-sm font-black text-amber-300 font-mono tracking-wider">
+                      {submissionStatus.remainingFormatted}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/90 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex items-center space-x-2 text-slate-300 text-xs font-bold uppercase font-mono">
+                    <Mic className="h-4 w-4 text-sky-400" />
+                    <span>Palavra-Chave Oficial Antifraude (Fale no Vídeo):</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 bg-slate-900 p-3 rounded-lg border border-slate-700">
+                    <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono tracking-widest uppercase">
+                      🗣️ "{submissionStatus.activeWindow?.secret || currentTournament.keyword || 'PESCA2026'}"
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950 px-2.5 py-1 rounded border border-emerald-700 shrink-0">
+                      Obrigatória no Vídeo
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    🚨 <strong>Regulamento Oficial:</strong> O envio de capturas é permitido exclusivamente durante o período da prova estipulado pelos organizadores e administradores. O sistema valida automaticamente o horário exato.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Status 3: Window Expired (Window ended) */}
+            {submissionStatus.status === 'window_expired' && (
+              <div className="p-4 sm:p-5 bg-rose-950/30 border-2 border-rose-500/40 rounded-2xl space-y-3">
+                <div className="flex items-center space-x-2 text-rose-400">
+                  <AlertTriangle className="h-5 w-5 shrink-0" />
+                  <span className="text-xs sm:text-sm font-black uppercase tracking-wider font-mono">
+                    🚨 JANELA DE CAPTURA ENCERRADA (HORÁRIO ESGOTADO)
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  O horário limite para captura e submissão definido pelo Administrador foi encerrado. Não é permitido enviar capturas fora do prazo estabelecido pelos árbitros.
+                </p>
+              </div>
+            )}
+
+            {/* Standard keyword if no windows */}
+            {!hasConfiguredWindows && submissionStatus.status === 'open_standard' && (
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
+                <div className="flex items-center space-x-2 text-amber-400">
+                  <Key className="h-4 w-4 stroke-[2.2]" />
+                  <span className="text-xs font-bold uppercase tracking-wider font-mono">Palavra-Chave de Validação</span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Para comprovar que a captura foi feita durante o torneio, fale ou mostre a palavra-chave oficial:
+                </p>
+                <div className="flex items-center space-x-3.5 mt-2 bg-slate-950 p-2.5 rounded-xl border border-amber-500/20 w-fit">
+                  <span className="text-[10px] text-slate-500 font-mono uppercase">PALAVRA-CHAVE ATIVA:</span>
+                  <span className="font-extrabold text-amber-400 font-mono text-sm tracking-wider uppercase px-2 py-0.5 bg-amber-500/10 rounded">
+                    {currentTournament.keyword || "PESCA2026"}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -364,10 +505,11 @@ export default function SubmitCatchForm({
             <div className="flex gap-2">
               <input
                 type="text"
+                disabled={!submissionStatus.canSubmit}
                 placeholder="Ex: Tucunaré Azul"
                 value={species}
                 onChange={(e) => setSpecies(e.target.value)}
-                className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm"
+                className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm disabled:opacity-50"
               />
             </div>
             {suggestedSpecies.length > 0 && (
@@ -378,6 +520,7 @@ export default function SubmitCatchForm({
                     <button
                       type="button"
                       key={s}
+                      disabled={!submissionStatus.canSubmit}
                       onClick={() => setSpecies(s)}
                       className={`text-[11px] px-2.5 py-0.5 rounded-lg border transition ${
                         species === s
@@ -400,10 +543,11 @@ export default function SubmitCatchForm({
               <MapPin className="absolute left-3 top-2.5 text-slate-500 h-4 w-4" />
               <input
                 type="text"
-                placeholder="Ex: Rio Paranaíba - Itumbiara GO"
+                disabled={!submissionStatus.canSubmit}
+                placeholder="Ex: Rio Grande - MG, Represa Billings, etc"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-250 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm text-slate-200"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm disabled:opacity-50"
               />
             </div>
             <span className="text-[9px] text-slate-500 font-mono">Basta informar município, represa ou rio em linhas gerais.</span>
@@ -417,10 +561,11 @@ export default function SubmitCatchForm({
               <input
                 type="number"
                 step="0.1"
+                disabled={!submissionStatus.canSubmit}
                 placeholder="Ex: 58.5"
                 value={length}
                 onChange={(e) => setLength(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-250 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm text-slate-200"
+                className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm disabled:opacity-50"
               />
             </div>
             <span className="text-[9px] text-slate-500 font-mono">Do focinho até a ponta da cauda sobre fita visível.</span>
@@ -428,19 +573,33 @@ export default function SubmitCatchForm({
 
           {/* Weight */}
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">Peso Estimado (kg) - Opcional</label>
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-semibold text-slate-300 font-mono uppercase tracking-wider block">
+                {isWeightMetric ? '⚖️ Peso do Peixe (kg) - Obrigatório' : 'Peso Estimado (kg) - Opcional'}
+              </label>
+              {isWeightMetric && (
+                <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-950 px-2 py-0.5 rounded border border-emerald-700">
+                  Ranking por Kilo
+                </span>
+              )}
+            </div>
             <div className="relative">
               <Scale className="absolute left-3 top-2.5 text-slate-500 h-4 w-4" />
               <input
                 type="number"
                 step="0.01"
-                placeholder="Ex: 4.25"
+                disabled={!submissionStatus.canSubmit}
+                placeholder="Ex: 4.250"
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-250 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm text-slate-200"
+                className={`w-full bg-slate-950 border rounded-xl pl-9 pr-4 py-2.5 focus:outline-none text-xs sm:text-sm disabled:opacity-50 ${
+                  isWeightMetric ? 'border-emerald-500/50 text-emerald-300 focus:border-emerald-400' : 'border-slate-800 text-slate-200 focus:border-sky-500'
+                }`}
               />
             </div>
-            <span className="text-[9px] text-slate-500 font-mono">Opcional. Adicione se tiver balança homologada na foto.</span>
+            <span className="text-[9px] text-slate-500 font-mono">
+              {isWeightMetric ? 'Obrigatório: balança oficial visível na foto para homologação.' : 'Opcional. Adicione se tiver balança homologada na foto.'}
+            </span>
           </div>
         </div>
 
@@ -645,13 +804,18 @@ export default function SubmitCatchForm({
           
           <button
             type="submit"
-            disabled={isSubmitting || !photoBase64 || !species || !length}
+            disabled={isSubmitting || !photoBase64 || !species || !length || !submissionStatus.canSubmit}
             className="px-6 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-450 hover:to-indigo-500 disabled:from-slate-800 disabled:to-slate-800 text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg hover:shadow-sky-500/20 transition-all flex items-center justify-center gap-2 disabled:text-slate-500 disabled:cursor-not-allowed cursor-pointer"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>Registrando Pescaria...</span>
+              </>
+            ) : !submissionStatus.canSubmit ? (
+              <>
+                <Lock className="h-4.5 w-4.5" />
+                <span>Envios Bloqueados</span>
               </>
             ) : (
               <>

@@ -27,6 +27,20 @@ export interface AppNotification {
   createdAt: any;
 }
 
+export interface TournamentWinner {
+  userId?: string;
+  userName: string;
+  userEmail?: string;
+  teamId?: string;
+  teamName?: string;
+  teamLogo?: string;
+  trophy?: string; // Ex: "1º Lugar Geral - Campeão Ouro"
+  catchSize?: number; // Ex: 68.5 (cm)
+  species?: string; // Ex: "Tucunaré Azul"
+  photoUrl?: string;
+  notes?: string;
+}
+
 export interface Tournament {
   id: string;
   title: string;
@@ -50,24 +64,42 @@ export interface Tournament {
   currentPhase?: string;
   imageUrl: string;
   participantCount: number;
+  championInfo?: TournamentWinner;
+  runnerUpInfo?: TournamentWinner;
+  thirdPlaceInfo?: TournamentWinner;
+  completedAt?: any;
+}
+
+export type ParticipationCategory = 'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto';
+
+export interface CodeUsageMember {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userCpf?: string;
+  usedAt: any;
 }
 
 export interface TournamentCode {
   id: string;
-  code: string; // Ex: TRN-9482-KF91
+  code: string; // Ex: TRN-9482-KF91 (único, nunca se repete)
   tournamentId: string;
   tournamentTitle: string;
-  // Anti-fraud: Assigned to a specific registered user
+  // Anti-fraud: Assigned to a specific registered user (Titular / Pagante)
   assignedToUserId?: string;
   assignedToUserName?: string;
   assignedToUserEmail?: string;
   assignedToUserCpf?: string;
+  category?: ParticipationCategory; // 'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'
+  maxParticipants?: number; // 1, 2, 3, 4, 5
+  usedCount?: number; // quantas pessoas usaram
+  usedByMembers?: CodeUsageMember[];
   paymentStatus?: 'paid' | 'pending' | 'free';
   paymentAmount?: number;
   paymentNotes?: string;
   createdAt: any;
   createdBy?: string;
-  isUsed: boolean;
+  isUsed: boolean; // true quando usedCount >= maxParticipants
   usedByUserId?: string;
   usedByUserName?: string;
   usedByUserEmail?: string;
@@ -92,6 +124,12 @@ export interface Catch {
   videoStartUrl?: string; // URL Vídeo Início (Fisgada)
   videoEndUrl?: string; // URL Vídeo Final (Embarque/Medição)
   createdAt: any; // Firestore Timestamp
+  submittedAtFormatted?: string; // Data e horário exato local do envio (ex: 22/08/2026 às 14:32:10)
+  submittedTimestamp?: number; // Epoch timestamp in ms
+  captureWindowId?: string; // ID da janela de captura associada
+  captureWindowName?: string; // Nome da etapa / janela
+  captureWindowSecret?: string; // Palavra-chave exigida para falar no vídeo
+  isWithinWindow?: boolean; // Se foi submetido dentro do horário regulamentar
   status: 'pending' | 'approved' | 'rejected';
   verifiedByAI: boolean;
   aiFeedback?: {
@@ -166,5 +204,26 @@ export interface UserProfile {
   permissions?: UserPermissions;
   status?: 'active' | 'blocked';
   enrolledTournaments?: string[];
+  teamLeftAt?: any;
   createdAt: any;
+}
+
+export interface SupportMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userCpf?: string;
+  userPhoto?: string;
+  subject: string;
+  message: string;
+  tournamentId?: string;
+  tournamentTitle?: string;
+  status: 'open' | 'answered' | 'closed';
+  adminResponse?: string;
+  answeredBy?: string;
+  answeredByName?: string;
+  answeredAt?: any;
+  createdAt: any;
+  updatedAt?: any;
 }

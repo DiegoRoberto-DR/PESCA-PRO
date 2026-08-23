@@ -1,6 +1,7 @@
 import React from 'react';
-import { Trophy, Calendar, Users, Award, Target, DollarSign, Key } from 'lucide-react';
+import { Trophy, Calendar, Users, Award, Target, DollarSign, Key, Radio, Clock } from 'lucide-react';
 import { Tournament } from '../types';
+import { getTournamentLiveStatus } from '../utils/dbHelpers';
 
 interface TournamentCardProps {
   key?: string;
@@ -10,7 +11,18 @@ interface TournamentCardProps {
 }
 
 export default function TournamentCard({ tournament, onParticipate, isLoggedIn }: TournamentCardProps) {
+  const liveInfo = getTournamentLiveStatus(tournament);
+
   const getStatusBadge = (status: Tournament['status']) => {
+    if (liveInfo.isLive) {
+      return (
+        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-lg shadow-rose-600/40 border border-rose-400 animate-pulse">
+          <span className="h-2 w-2 rounded-full bg-white mr-1.5 animate-ping"></span>
+          🔴 AO VIVO - PROVA ABERTA
+        </span>
+      );
+    }
+
     switch (status) {
       case 'active':
         return (
@@ -52,7 +64,7 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl hover:border-slate-700 transition-all duration-300 flex flex-col group h-full">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl hover:border-slate-700 transition-all duration-300 flex flex-col group h-full relative">
       {/* Target Image & Cover */}
       <div className="relative h-48 sm:h-52 w-full overflow-hidden bg-slate-950">
         <img 
@@ -67,6 +79,19 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
         <div className="absolute top-4 right-4 z-10">
           {getStatusBadge(tournament.status)}
         </div>
+
+        {/* Live Banner Overlay inside image if live */}
+        {liveInfo.isLive && liveInfo.activeWindow && (
+          <div className="absolute top-4 left-4 z-10 bg-slate-950/90 backdrop-blur-md border border-rose-500/40 px-2.5 py-1 rounded-xl flex items-center space-x-2 text-[11px] font-bold text-rose-400 shadow-xl">
+            <Radio className="h-3.5 w-3.5 text-rose-500 animate-pulse" />
+            <span>Janela: <strong>{liveInfo.activeWindow.name || 'Etapa Hoje'}</strong></span>
+            {liveInfo.timeRemainingStr && (
+              <span className="text-white font-mono text-[10px] bg-rose-950/80 px-1.5 py-0.5 rounded border border-rose-700">
+                Faltam {liveInfo.timeRemainingStr}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Metric indicator badge overlay */}
         <div className="absolute bottom-4 left-4 z-10 flex items-center space-x-1.5 bg-slate-950/85 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-slate-300 text-xs">
