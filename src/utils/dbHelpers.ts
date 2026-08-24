@@ -979,6 +979,53 @@ export async function validateAndConsumeTournamentCode(
   }
 
   try {
+    // 0. Verify Tournament Format & Team Captain requirement
+    const tourDocRef = doc(db, 'tournaments', tournamentId);
+    const tourSnap = await getDoc(tourDocRef);
+    if (!tourSnap.exists()) {
+      return { success: false, message: 'Campeonato não encontrado.' };
+    }
+    const tourData = tourSnap.data() as Tournament;
+
+    const isTeamTourney = Boolean(tourData.teamFormat && tourData.teamFormat !== 'solo');
+    if (isTeamTourney) {
+      const requiredSpots = tourData.teamFormat === 'dupla' ? 2 : tourData.teamFormat === 'trio' ? 3 : tourData.teamFormat === 'quarteto' ? 4 : 5;
+      const userTeam = await getUserTeam(user.uid);
+
+      if (!userTeam) {
+        return {
+          success: false,
+          message: `🚫 INSCRIÇÃO EXCLUSIVA PARA CAPITÃO: Este campeonato é no formato ${tourData.teamFormat?.toUpperCase()} (${requiredSpots} pessoas). Quem não tem equipe deve montar sua própria equipe (sendo o Capitão) ou entrar em uma equipe existente. Pescadores sem equipe podem participar apenas de torneios da categoria Solo.`
+        };
+      }
+
+      // Check if user is the Captain
+      const isCaptain = userTeam.creatorId === user.uid ||
+        (user.email && userTeam.creatorEmail && userTeam.creatorEmail.toLowerCase() === user.email.toLowerCase()) ||
+        userTeam.members?.some(m => m.userId === user.uid && m.role === 'captain');
+
+      if (!isCaptain) {
+        return {
+          success: false,
+          message: `👑 SOMENTE O CAPITÃO PODE INSCREVER A EQUIPE: Você é membro da equipe "${userTeam.name}". Apenas o Capitão (${userTeam.creatorName || userTeam.creatorEmail || 'Capitão da Equipe'}) pode efetuar o pagamento e autenticar a inscrição da equipe neste campeonato.`
+        };
+      }
+
+      if (userTeam.status !== 'approved') {
+        return {
+          success: false,
+          message: `🛑 EQUIPE NÃO HOMOLOGADA: Sua equipe "${userTeam.name}" está aguardando aprovação do Administrador para poder participar.`
+        };
+      }
+
+      if ((userTeam.members?.length || 0) < requiredSpots) {
+        return {
+          success: false,
+          message: `⚠️ EQUIPE INCOMPLETA: Sua equipe "${userTeam.name}" possui ${userTeam.members?.length || 0} de ${requiredSpots} vagas preenchidas. Preencha todas as vagas com os seus parceiros antes de ativar a inscrição.`
+        };
+      }
+    }
+
     // 1. Query tournament_codes collection
     const snapshot = await getDocs(collection(db, 'tournament_codes'));
     let matchedDoc: { id: string; data: TournamentCode } | null = null;
@@ -1109,11 +1156,7 @@ export async function validateAndConsumeTournamentCode(
     }
 
     // 2. Fallback check on tournament.tournamentCode or tournament.keyword if not yet entered in table
-    const tourDocRef = doc(db, 'tournaments', tournamentId);
-    const tourSnap = await getDoc(tourDocRef);
-
     if (tourSnap.exists()) {
-      const tourData = tourSnap.data() as Tournament;
       const masterCode = (tourData.tournamentCode || tourData.keyword || '').trim().toUpperCase();
 
       if (masterCode && cleanCode === masterCode) {
@@ -1564,13 +1607,15 @@ export async function leaveTeam(
       }
     }
 
-    // Clear team from user doc
+    // Clear team from user doc and record teamLeftAt (7-day rule)
+    const nowIso = new Date().toISOString();
     try {
       const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
         teamId: '',
         teamName: '',
-        teamLogo: ''
+        teamLogo: '',
+        teamLeftAt: nowIso
       });
     } catch (e) {
       console.warn("Aviso ao limpar dados de equipe do usuário:", e);
@@ -1578,13 +1623,257 @@ export async function leaveTeam(
 
     return {
       success: true,
-      message: 'Você saiu da equipe com sucesso.'
+      message: 'Você saiu da equipe com sucesso. Regulamento oficial: É necessário aguardar 7 dias corridos para criar ou ingressar em outra equipe.'
     };
   } catch (error: any) {
     console.error("Erro ao sair da equipe:", error);
     return {
       success: false,
       message: 'Erro ao sair da equipe: ' + (error.message || 'Tente novamente.')
+    };
+  }
+}
+
+// Delete Team by Creator (Only creator can delete, and ONLY after removing all other members)
+export async function deleteTeamByCreator(
+  teamId: string,
+  creatorUserId: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const teamRef = doc(db, 'teams', teamId);
+    const teamSnap = await getDoc(teamRef);
+
+    if (!teamSnap.exists()) {
+      return { success: false, message: 'Equipe não encontrada no sistema.' };
+    }
+
+    const team = teamSnap.data() as Team;
+
+    // Check if requester is really the creator
+    if (team.creatorId !== creatorUserId) {
+      return { 
+        success: false, 
+        message: 'Apenas o pescador que criou a equipe tem autorização para excluí-la.' 
+      };
+    }
+
+    // Check if there are still other members in the team
+    const otherMembers = (team.members || []).filter(m => m.userId !== creatorUserId);
+    if (otherMembers.length > 0) {
+      return {
+        success: false,
+        message: `⚠️ Para excluir a equipe, você deve primeiro remover todos os ${otherMembers.length} outro(s) participante(s). A equipe só pode ser excluída quando restar apenas você.`
+      };
+    }
+
+    // Delete the team doc from Firestore
+    await deleteDoc(teamRef);
+
+    // Clear creator's user doc team info & record teamLeftAt (7-day rule)
+    const nowIso = new Date().toISOString();
+    try {
+      const userRef = doc(db, 'users', creatorUserId);
+      await updateDoc(userRef, {
+        teamId: '',
+        teamName: '',
+        teamLogo: '',
+        teamLeftAt: nowIso
+      });
+    } catch (e) {
+      console.warn("Aviso ao limpar dados de equipe do criador:", e);
+    }
+
+    return {
+      success: true,
+      message: 'Equipe excluída com sucesso!'
+    };
+  } catch (error: any) {
+    console.error("Erro ao excluir equipe:", error);
+    return {
+      success: false,
+      message: 'Erro ao excluir equipe: ' + (error.message || 'Tente novamente.')
+    };
+  }
+}
+
+// Check 7-day cooldown helper
+export function getTeamChangeRemainingCooldownMs(teamLeftAt?: any): number {
+  if (!teamLeftAt) return 0;
+  let timestamp = 0;
+  if (typeof teamLeftAt === 'string') {
+    timestamp = new Date(teamLeftAt).getTime();
+  } else if (teamLeftAt?.toDate) {
+    timestamp = teamLeftAt.toDate().getTime();
+  } else if (typeof teamLeftAt === 'number') {
+    timestamp = teamLeftAt;
+  }
+  if (!timestamp || isNaN(timestamp)) return 0;
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const diff = timestamp + SEVEN_DAYS_MS - Date.now();
+  return diff > 0 ? diff : 0;
+}
+
+// Format cooldown to human readable string (e.g. "6 dias, 14 horas e 22 minutos")
+export function formatCooldown(ms: number): string {
+  if (ms <= 0) return '0 minutos';
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / (3600 * 24));
+  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days} dia${days > 1 ? 's' : ''}`);
+  if (hours > 0) parts.push(`${hours} hora${hours > 1 ? 's' : ''}`);
+  if (minutes > 0 || parts.length === 0) parts.push(`${minutes} minuto${minutes > 1 ? 's' : ''}`);
+  return parts.join(', ');
+}
+
+// =========================================================================
+// SUPPORT & ADMIN CONTACT TICKETS
+// =========================================================================
+
+// Send a support message to Admin
+export async function sendSupportMessage(data: {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userCpf?: string;
+  userPhoto?: string;
+  subject: string;
+  message: string;
+  tournamentId?: string;
+  tournamentTitle?: string;
+}): Promise<{ success: boolean; message: string; ticketId?: string }> {
+  try {
+    const payload = cleanFirestoreData({
+      userId: data.userId,
+      userName: data.userName || 'Pescador',
+      userEmail: data.userEmail || '',
+      userCpf: data.userCpf || '',
+      userPhoto: data.userPhoto || '',
+      subject: data.subject.trim(),
+      message: data.message.trim(),
+      tournamentId: data.tournamentId || '',
+      tournamentTitle: data.tournamentTitle || '',
+      status: 'open',
+      adminResponse: '',
+      answeredBy: '',
+      answeredByName: '',
+      answeredAt: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    const docRef = await addDoc(collection(db, 'support_messages'), payload);
+    return { 
+      success: true, 
+      message: 'Sua mensagem de suporte foi enviada ao Administrador! Aguarde o retorno pela plataforma.', 
+      ticketId: docRef.id 
+    };
+  } catch (err: any) {
+    console.error("Erro ao enviar mensagem de suporte:", err);
+    return { 
+      success: false, 
+      message: 'Erro ao enviar mensagem: ' + (err.message || 'Tente novamente.') 
+    };
+  }
+}
+
+// Subscribe to all support messages (Admin only)
+export function subscribeSupportMessages(callback: (messages: SupportMessage[]) => void) {
+  const q = query(collection(db, 'support_messages'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const list: SupportMessage[] = [];
+    snapshot.forEach((d) => {
+      list.push({ id: d.id, ...d.data() } as SupportMessage);
+    });
+    callback(list);
+  }, (err) => {
+    console.error("Erro ao assinar mensagens de suporte:", err);
+  });
+}
+
+// Subscribe to user's support messages
+export function subscribeUserSupportMessages(userId: string, callback: (messages: SupportMessage[]) => void) {
+  const q = query(collection(db, 'support_messages'), where('userId', '==', userId));
+  return onSnapshot(q, (snapshot) => {
+    const list: SupportMessage[] = [];
+    snapshot.forEach((d) => {
+      list.push({ id: d.id, ...d.data() } as SupportMessage);
+    });
+    list.sort((a, b) => {
+      const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : (new Date(a.createdAt).getTime() || 0);
+      const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : (new Date(b.createdAt).getTime() || 0);
+      return dateB - dateA;
+    });
+    callback(list);
+  }, (err) => {
+    console.error("Erro ao assinar mensagens de suporte do usuário:", err);
+  });
+}
+
+// Respond to support message (Admin only)
+export async function respondSupportMessage(
+  ticketId: string, 
+  adminUserOrResponse: UserProfile | string, 
+  responseTextOrAdminId?: string,
+  adminName?: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const docRef = doc(db, 'support_messages', ticketId);
+    let finalResponse = '';
+    let adminId = '';
+    let finalAdminName = 'ADMIN';
+
+    if (typeof adminUserOrResponse === 'object') {
+      finalResponse = (responseTextOrAdminId || '').trim();
+      adminId = adminUserOrResponse.uid;
+      finalAdminName = adminUserOrResponse.displayName || adminUserOrResponse.fullName || 'ADMIN';
+    } else {
+      finalResponse = (adminUserOrResponse || '').trim();
+      adminId = responseTextOrAdminId || 'admin';
+      finalAdminName = adminName || 'ADMIN';
+    }
+
+    await updateDoc(docRef, {
+      adminResponse: finalResponse,
+      status: 'answered',
+      answeredBy: adminId,
+      adminId: adminId,
+      answeredByName: finalAdminName,
+      adminName: finalAdminName,
+      answeredAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    return { 
+      success: true, 
+      message: 'Resposta oficial enviada com sucesso ao competidor!' 
+    };
+  } catch (err: any) {
+    console.error("Erro ao responder suporte:", err);
+    return { 
+      success: false, 
+      message: 'Erro ao salvar resposta: ' + (err.message || 'Tente novamente.') 
+    };
+  }
+}
+
+export const respondToSupportMessage = respondSupportMessage;
+
+// Delete/Close support message (Admin or User)
+export async function deleteSupportMessage(ticketId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const docRef = doc(db, 'support_messages', ticketId);
+    await deleteDoc(docRef);
+    return { 
+      success: true, 
+      message: 'Mensagem de suporte removida com sucesso.' 
+    };
+  } catch (err: any) {
+    console.error("Erro ao excluir mensagem de suporte:", err);
+    return { 
+      success: false, 
+      message: 'Erro ao excluir mensagem: ' + (err.message || 'Tente novamente.') 
     };
   }
 }
@@ -2009,5 +2298,7 @@ export function subscribeAllUsers(callback: (users: UserProfile[]) => void) {
     console.error("Erro ao assinar usuários:", error);
   });
 }
+
+
 
 

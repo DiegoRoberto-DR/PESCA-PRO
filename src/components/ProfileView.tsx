@@ -36,9 +36,16 @@ import {
   Bell,
   Calendar,
   Radio,
-  Timer
+  Timer,
+  Search,
+  Filter,
+  CheckCheck,
+  Inbox,
+  Eye,
+  X,
+  SlidersHorizontal
 } from 'lucide-react';
-import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification } from '../types';
+import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification, SupportMessage } from '../types';
 import { 
   submitCatch, 
   subscribeUserTournamentCodes, 
@@ -48,13 +55,19 @@ import {
   joinTeamByCode,
   removeMemberFromTeam,
   leaveTeam,
+  deleteTeamByCreator,
+  getTeamChangeRemainingCooldownMs,
+  formatCooldown,
   updateTeam,
   subscribeNotifications,
   markNotificationAsRead,
   updateUserProfilePhoto,
   getTournamentSubmissionDeadline,
   getCaptureWindowStatus as getCaptureWindowStatusUtil,
-  formatTimeRemainingMs
+  formatTimeRemainingMs,
+  sendSupportMessage,
+  subscribeUserSupportMessages,
+  deleteSupportMessage
 } from '../utils/dbHelpers';
 
 interface ProfileViewProps {
@@ -76,11 +89,26 @@ export default function ProfileView({
   onLogout
 }: ProfileViewProps) {
   // Navigation tabs in profile
-  const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'windows' | 'submit' | 'catches'>('registration');
+  const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'windows' | 'submit' | 'catches' | 'support'>('registration');
+
+  // Support messages state
+  const [userSupportTickets, setUserSupportTickets] = useState<SupportMessage[]>([]);
+  const [supportSubject, setSupportSubject] = useState<string>('');
+  const [supportMessageText, setSupportMessageText] = useState<string>('');
+  const [isSendingSupport, setIsSendingSupport] = useState<boolean>(false);
+  const [supportSuccessMsg, setSupportSuccessMsg] = useState<string>('');
+  const [supportErrorMsg, setSupportErrorMsg] = useState<string>('');
 
   // Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [copiedWindowSecretId, setCopiedWindowSecretId] = useState<string | null>(null);
+  const [notifSearchQuery, setNotifSearchQuery] = useState<string>('');
+  const [showReadNotifsHistory, setShowReadNotifsHistory] = useState<boolean>(false);
+
+  // Capture Windows & Tournaments Search / Filter State
+  const [tournamentSearchQuery, setTournamentSearchQuery] = useState<string>('');
+  const [tourneyFilterId, setTourneyFilterId] = useState<string>('all');
+  const [stageStatusFilter, setStageStatusFilter] = useState<'all' | 'live' | 'upcoming' | 'ended'>('all');
 
   // Realtime codes assigned to this user
   const [userCodes, setUserCodes] = useState<TournamentCode[]>([]);
@@ -215,6 +243,22 @@ export default function ProfileView({
     };
   }, []);
 
+  // Subscribe to user's support messages in real time
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const unsubscribe = subscribeUserSupportMessages(currentUser.uid, (messages) => {
+      setUserSupportTickets(messages);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [currentUser?.uid]);
+
+  // Team 7-day cooldown calculation
+  const remainingCooldownMs = getTeamChangeRemainingCooldownMs(currentUser.teamLeftAt);
+  const isCooldownActive = remainingCooldownMs > 0;
+  const cooldownFormatted = formatCooldown(remainingCooldownMs);
+
   // Filter catches for current user
   const userCatches = catches.filter(
     c => c.userId === currentUser.uid || c.userEmail === currentUser.email
@@ -233,11 +277,27 @@ export default function ProfileView({
     ? Math.round((approvedCatches.length / userCatches.length) * 100)
     : 0;
 
+  // Helper to check if a notification was read by current user
+  const isNotifReadByUser = (notif: AppNotification) => {
+    return Boolean(
+      (notif.readBy && notif.readBy.includes(currentUser.uid)) ||
+      (notif.isRead && (!notif.readBy || notif.readBy.length === 0))
+    );
+  };
+
   // Filter ONLY tournaments where this fisherman is actively enrolled or participating
+  // User Requirement: If a user is joined in a team (duo, trio, 4 or 5), they MUST NOT see or submit to solo tournaments.
   const participatingTournaments = tournaments.filter(t => {
+    // If user is actively part of a team, hide individual/solo tournaments completely from their dashboard
+    if (userTeam && t.teamFormat === 'solo') {
+      return false;
+    }
+
     const isEnrolled = currentUser.enrolledTournaments?.includes(t.id);
     const hasCatchInTournament = userCatches.some(c => c.tournamentId === t.id);
-    return Boolean(isEnrolled || hasCatchInTournament);
+    const isInTeamWithTournament = userTeam?.tournamentIds?.includes(t.id);
+    const hasCodeForTournament = userCodes.some(c => c.tournamentId === t.id);
+    return Boolean(isEnrolled || hasCatchInTournament || isInTeamWithTournament || hasCodeForTournament);
   });
 
   // Live ticking clock for real-time validation and countdowns
@@ -248,12 +308,44 @@ export default function ProfileView({
   }, []);
 
   // Filter notifications relevant to user's enrolled tournaments or general
+  // When a user is in a team, only show notifications corresponding to team tournaments (e.g. duo, trio, etc.) and their team's tournaments
   const userTourneyIds = (currentUser.enrolledTournaments || []).concat(participatingTournaments.map(t => t.id));
   const relevantNotifications = notifications.filter(n => {
-    if (!n.tournamentId) return true;
-    return userTourneyIds.includes(n.tournamentId);
+    // If user is in a team and notification is linked to a tournament, ensure it's not a solo tournament
+    if (n.tournamentId) {
+      const tourney = tournaments.find(t => t.id === n.tournamentId);
+      if (userTeam && tourney?.teamFormat === 'solo') {
+        return false;
+      }
+      return userTourneyIds.includes(n.tournamentId);
+    }
+    // General notifications (without specific tournament)
+    return true;
   });
-  const unreadNotifsCount = relevantNotifications.filter(n => !n.isRead && (!n.readBy || !n.readBy.includes(currentUser.uid))).length;
+  const unreadNotifsCount = relevantNotifications.filter(n => !isNotifReadByUser(n)).length;
+
+  // Filtered notifications based on search and read status
+  const displayedNotifications = relevantNotifications.filter(notif => {
+    const isRead = isNotifReadByUser(notif);
+    const search = notifSearchQuery.trim().toLowerCase();
+
+    if (search) {
+      // Searching across ALL notifications (both unread and read)
+      const matchesTitle = notif.title?.toLowerCase().includes(search);
+      const matchesMsg = notif.message?.toLowerCase().includes(search);
+      const matchesSecret = notif.windowSecret?.toLowerCase().includes(search);
+      const tourney = tournaments.find(t => t.id === notif.tournamentId);
+      const matchesTourney = tourney?.title?.toLowerCase().includes(search);
+      return matchesTitle || matchesMsg || matchesSecret || matchesTourney;
+    }
+
+    if (showReadNotifsHistory) {
+      return true;
+    }
+
+    // Default: ONLY unread notifications are displayed! Once marked as read, they immediately disappear.
+    return !isRead;
+  });
 
   // All capture windows across user's enrolled tournaments
   const userCaptureWindows: (CaptureWindow & { tournamentId: string; tournamentTitle: string; tournamentStatus: string })[] = [];
@@ -516,6 +608,95 @@ export default function ProfileView({
       setTeamError('Erro ao sair da equipe: ' + (err.message || 'Tente novamente.'));
     } finally {
       setIsTeamLoading(false);
+    }
+  };
+
+  const handleDeleteTeamByCreatorAction = async () => {
+    if (!userTeam) return;
+
+    // Check if user is the creator
+    if (userTeam.creatorId !== currentUser.uid) {
+      alert('Apenas o criador da equipe tem permissão para excluí-la.');
+      return;
+    }
+
+    // Check if other members exist
+    const otherMembers = (userTeam.members || []).filter(m => m.userId !== currentUser.uid);
+    if (otherMembers.length > 0) {
+      alert(`⚠️ Para excluir a equipe, você deve primeiro remover todos os outros ${otherMembers.length} participante(s). Clique no ícone de lixeira vermelha ao lado de cada integrante na lista de membros antes de excluir a equipe.`);
+      return;
+    }
+
+    if (!confirm(`Tem certeza que deseja EXCLUIR DEFINITIVAMENTE a equipe "${userTeam.name}"?\n\nA equipe será apagada do banco de dados e você entrará no período regulamentar de 7 dias corridos de carência para criar ou entrar em outra equipe.`)) {
+      return;
+    }
+
+    try {
+      setIsTeamLoading(true);
+      const res = await deleteTeamByCreator(userTeam.id, currentUser.uid);
+      if (res.success) {
+        setTeamSuccess(res.message);
+        setUserTeam(null);
+      } else {
+        setTeamError(res.message);
+      }
+    } catch (err: any) {
+      setTeamError('Erro ao excluir equipe: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsTeamLoading(false);
+    }
+  };
+
+  const handleSendSupport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSupportErrorMsg('');
+    setSupportSuccessMsg('');
+
+    if (!supportSubject.trim()) {
+      setSupportErrorMsg('Por favor, informe o assunto da solicitação.');
+      return;
+    }
+    if (!supportMessageText.trim()) {
+      setSupportErrorMsg('Por favor, digite a sua mensagem detalhada para o Administrador.');
+      return;
+    }
+
+    try {
+      setIsSendingSupport(true);
+      const res = await sendSupportMessage({
+        userId: currentUser.uid,
+        userName: currentUser.displayName || currentUser.fullName || 'Competidor Fisgada Pro',
+        userEmail: currentUser.email,
+        userCpf: currentUser.cpf || '',
+        userPhoto: currentPhotoURL || '',
+        subject: supportSubject.trim(),
+        message: supportMessageText.trim()
+      });
+
+      if (res.success) {
+        setSupportSuccessMsg('Sua mensagem de suporte foi enviada com sucesso! O Administrador responderá diretamente na sua aba de suporte.');
+        setSupportSubject('');
+        setSupportMessageText('');
+      } else {
+        setSupportErrorMsg(res.message);
+      }
+    } catch (err: any) {
+      setSupportErrorMsg('Erro ao enviar mensagem: ' + (err.message || 'Tente novamente.'));
+    } finally {
+      setIsSendingSupport(false);
+    }
+  };
+
+  const handleDeleteSupportTicket = async (ticketId: string) => {
+    if (!confirm('Deseja excluir esta mensagem do seu histórico de suporte?')) return;
+    try {
+      const res = await deleteSupportMessage(ticketId);
+      if (res.success) {
+        setSupportSuccessMsg('Mensagem de suporte removida com sucesso.');
+        setTimeout(() => setSupportSuccessMsg(''), 3000);
+      }
+    } catch (err: any) {
+      setSupportErrorMsg('Erro ao remover mensagem: ' + (err.message || 'Tente novamente.'));
     }
   };
 
@@ -789,6 +970,23 @@ export default function ProfileView({
             <Trophy className="h-4 w-4" />
             <span>Minhas Capturas ({userCatches.length})</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('support')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+              activeTab === 'support'
+                ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <MessageCircle className="h-4 w-4" />
+            <span>Suporte</span>
+            {userSupportTickets.filter(t => t.status === 'answered').length > 0 && (
+              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 animate-pulse">
+                {userSupportTickets.filter(t => t.status === 'answered').length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -929,63 +1127,6 @@ export default function ProfileView({
 
           {/* Right: Anti-fraud Explanation & Security Card */}
           <div className="lg:col-span-5 space-y-6">
-            {/* Foto de Perfil Card */}
-            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-5">
-              <div className="flex items-center gap-2.5 text-emerald-400">
-                <ImageIcon className="h-6 w-6" />
-                <div>
-                  <h4 className="text-base font-black text-white uppercase">Foto de Perfil do Competidor</h4>
-                  <p className="text-xs text-slate-400">Sua foto aparecerá nos rankings oficiais e pódios</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center gap-4 bg-[#1a1c20] p-4 rounded-2xl border border-slate-800">
-                <div className="relative group shrink-0">
-                  <div className="w-20 h-20 rounded-2xl bg-slate-900 border-2 border-emerald-500/30 flex items-center justify-center font-black text-2xl text-emerald-400 overflow-hidden shadow-md">
-                    {currentPhotoURL ? (
-                      <img
-                        src={currentPhotoURL}
-                        alt="Foto de perfil"
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      currentUser.displayName.charAt(0).toUpperCase()
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-2 text-center sm:text-left flex-1">
-                  <p className="text-xs text-slate-300">
-                    Selecione uma foto sua segurando um peixe ou sua foto de pescador.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => profilePhotoInputRef.current?.click()}
-                    disabled={isUploadingPhoto}
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md mx-auto sm:mx-0"
-                  >
-                    <Upload className="h-4 w-4" />
-                    <span>{isUploadingPhoto ? 'Enviando...' : 'Buscar Foto no Dispositivo'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {photoUploadSuccess && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-                  <span>{photoUploadSuccess}</span>
-                </div>
-              )}
-
-              {photoUploadError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-                  <span>{photoUploadError}</span>
-                </div>
-              )}
-            </div>
-
             <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
               <div className="flex items-center gap-2.5 text-emerald-400">
                 <ShieldCheck className="h-6 w-6" />
@@ -1008,9 +1149,31 @@ export default function ProfileView({
                 </div>
                 <div className="flex items-start gap-2 text-xs text-slate-400">
                   <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>Envio de capturas em campeonatos de duplas liberado apenas com equipe completa.</span>
+                  <span>Carência de 7 dias corridos ao sair de equipe para criar ou ingressar em outra.</span>
+                </div>
+                <div className="flex items-start gap-2 text-xs text-slate-400">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Exclusão de equipe restrita ao criador após remover todos os integrantes.</span>
                 </div>
               </div>
+            </div>
+
+            {/* Suporte Quick Box */}
+            <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 shadow-xl space-y-3">
+              <div className="flex items-center gap-2.5 text-sky-400">
+                <MessageCircle className="h-5 w-5" />
+                <h4 className="text-sm font-black text-white uppercase">Precisa de Suporte?</h4>
+              </div>
+              <p className="text-xs text-slate-300">
+                Tem dúvidas sobre regulamento, códigos ou capturas? Entre em contato diretamente com a Administração.
+              </p>
+              <button
+                onClick={() => setActiveTab('support')}
+                className="w-full py-2.5 bg-[#1b1e22] hover:bg-slate-800 text-sky-400 hover:text-sky-300 font-bold text-xs rounded-xl border border-sky-500/20 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>Abrir Atendimento com Admin</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1369,16 +1532,31 @@ export default function ProfileView({
                   </div>
                 </div>
 
-                {/* Team Controls & Leave button */}
+                {/* Team Controls & Action buttons */}
                 <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
-                  <button
-                    onClick={handleLeaveTeam}
-                    disabled={isTeamLoading}
-                    className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    <span>Sair da Equipe</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleLeaveTeam}
+                      disabled={isTeamLoading}
+                      className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      <span>Sair da Equipe</span>
+                    </button>
+
+                    {/* Excluir Equipe: Visível apenas para o criador */}
+                    {userTeam.creatorId === currentUser.uid && (
+                      <button
+                        onClick={handleDeleteTeamByCreatorAction}
+                        disabled={isTeamLoading}
+                        className="px-4 py-2.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow"
+                        title="Exclusivo do criador da equipe. Requer remoção de todos os integrantes antes."
+                      >
+                        <Trash2 className="h-4 w-4 text-rose-400" />
+                        <span>Excluir Equipe (Criador)</span>
+                      </button>
+                    )}
+                  </div>
 
                   {!isTeamComplete && (
                     <span className="text-xs text-amber-400/90 font-mono">
@@ -1402,6 +1580,10 @@ export default function ProfileView({
 
                   <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs text-slate-400">
                     <div className="flex items-start gap-2">
+                      <Crown className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                      <span><strong className="text-white">Inscrição em Campeonatos:</strong> Somente o Capitão pode inscrever a equipe em torneios de duplas a quintetos (2 a 5 pessoas).</span>
+                    </div>
+                    <div className="flex items-start gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
                       <span>Limite fixo de membros ({userTeam.maxMembers} pessoas).</span>
                     </div>
@@ -1423,6 +1605,23 @@ export default function ProfileView({
             /* =================================================================== */
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+                {/* 7-DAY COOLDOWN BANNER */}
+                {isCooldownActive && (
+                  <div className="p-4 sm:p-5 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl space-y-3">
+                    <div className="flex items-center gap-2 text-amber-400 font-black text-sm uppercase">
+                      <Clock className="h-5 w-5 animate-pulse shrink-0" />
+                      <span>Período Regulamentar de Carência Ativo (7 Dias Corridos)</span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      Você abandonou ou excluiu uma equipe recentemente. De acordo com o regulamento oficial dos campeonatos, é obrigatório aguardar <strong>7 dias corridos</strong> após a saída para poder criar uma nova equipe ou ingressar em outra equipe existente.
+                    </p>
+                    <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 text-xs font-mono flex items-center justify-between text-amber-300">
+                      <span>Tempo restante de espera regulamentar:</span>
+                      <span className="font-extrabold text-amber-400">{cooldownFormatted}</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Form selector buttons: Criar Equipe vs Juntar-se a Equipe */}
                 <div className="flex bg-[#181a1e] p-1.5 rounded-2xl border border-slate-800 gap-1">
                   <button
@@ -1470,7 +1669,10 @@ export default function ProfileView({
                         placeholder="Ex: Tucuna Brothers, Equipe Gigantes do Rio, etc."
                         value={teamNameInput}
                         onChange={(e) => setTeamNameInput(e.target.value)}
-                        className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm focus:outline-none"
+                        disabled={isCooldownActive}
+                        className={`w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm focus:outline-none ${
+                          isCooldownActive ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                         required
                       />
                     </div>
@@ -1490,12 +1692,13 @@ export default function ProfileView({
                           <button
                             key={opt.count}
                             type="button"
+                            disabled={isCooldownActive}
                             onClick={() => setTeamSizeInput(opt.count)}
                             className={`p-3 rounded-2xl text-xs font-bold border transition text-center cursor-pointer ${
                               teamSizeInput === opt.count
                                 ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-extrabold shadow-sm'
                                 : 'bg-[#1b1e22] border-slate-800 text-slate-400 hover:text-white'
-                            }`}
+                            } ${isCooldownActive ? 'opacity-50 cursor-not-allowed' : ''}`}
                           >
                             <span className="text-base font-black block">{opt.count}</span>
                             <span className="text-[10px] block mt-0.5">{opt.label}</span>
@@ -1516,11 +1719,14 @@ export default function ProfileView({
                             type="url"
                             placeholder="Cole o link da imagem (URL) ou envie abaixo"
                             value={teamLogoUrlInput}
+                            disabled={isCooldownActive}
                             onChange={(e) => {
                               setTeamLogoUrlInput(e.target.value);
                               if (e.target.value) setTeamLogoBase64('');
                             }}
-                            className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none"
+                            className={`w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none ${
+                              isCooldownActive ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
                           />
 
                           <div className="flex items-center gap-2">
@@ -1533,8 +1739,11 @@ export default function ProfileView({
                             />
                             <button
                               type="button"
+                              disabled={isCooldownActive}
                               onClick={() => teamLogoInputRef.current?.click()}
-                              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer"
+                              className={`px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-2 cursor-pointer ${
+                                isCooldownActive ? 'opacity-50 cursor-not-allowed' : ''
+                              }`}
                             >
                               <Upload className="h-3.5 w-3.5 text-emerald-400" />
                               <span>Enviar Imagem do Dispositivo</span>
@@ -1560,10 +1769,14 @@ export default function ProfileView({
 
                     <button
                       type="submit"
-                      disabled={isTeamLoading}
-                      className="w-full py-3.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60 disabled:opacity-50"
+                      disabled={isTeamLoading || isCooldownActive}
+                      className="w-full py-3.5 bg-[#00c853] hover:bg-[#00e676] disabled:opacity-40 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60"
                     >
-                      {isTeamLoading ? 'Criando Equipe...' : 'Criar Equipe e Gerar Código'}
+                      {isCooldownActive
+                        ? `Carência Ativa (${cooldownFormatted})`
+                        : isTeamLoading
+                        ? 'Criando Equipe...'
+                        : 'Criar Equipe e Gerar Código'}
                     </button>
                   </form>
                 ) : (
@@ -1584,18 +1797,25 @@ export default function ProfileView({
                         type="text"
                         placeholder="Digite o código da equipe"
                         value={joinTeamCodeInput}
+                        disabled={isCooldownActive}
                         onChange={(e) => setJoinTeamCodeInput(e.target.value.toUpperCase())}
-                        className="w-full bg-[#1b1e22] border border-slate-800 focus:border-amber-500 text-amber-400 font-mono font-bold text-center tracking-widest rounded-xl px-4 py-3.5 text-base sm:text-lg uppercase focus:outline-none"
+                        className={`w-full bg-[#1b1e22] border border-slate-800 focus:border-amber-500 text-amber-400 font-mono font-bold text-center tracking-widest rounded-xl px-4 py-3.5 text-base sm:text-lg uppercase focus:outline-none ${
+                          isCooldownActive ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                         required
                       />
                     </div>
 
                     <button
                       type="submit"
-                      disabled={isTeamLoading}
-                      className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-amber-950/60 disabled:opacity-50"
+                      disabled={isTeamLoading || isCooldownActive}
+                      className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-amber-950/60"
                     >
-                      {isTeamLoading ? 'Validando Entrada...' : 'Entrar na Equipe'}
+                      {isCooldownActive
+                        ? `Carência Ativa (${cooldownFormatted})`
+                        : isTeamLoading
+                        ? 'Validando Entrada...'
+                        : 'Entrar na Equipe'}
                     </button>
                   </form>
                 )}
@@ -1615,6 +1835,10 @@ export default function ProfileView({
 
                   <div className="space-y-2.5 pt-2 border-t border-slate-800 text-xs text-slate-400">
                     <div className="flex items-start gap-2">
+                      <Crown className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                      <span><strong className="text-white">Inscrição de Equipes:</strong> Somente o Capitão pode inscrever a equipe em torneios de duplas a quintetos (2 a 5 pessoas).</span>
+                    </div>
+                    <div className="flex items-start gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
                       <span>Crie a equipe e receba o código único na hora.</span>
                     </div>
@@ -1624,7 +1848,7 @@ export default function ProfileView({
                     </div>
                     <div className="flex items-start gap-2">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <span>Em campeonatos de equipe, o envio de capturas é liberado quando o time estiver completo.</span>
+                      <span>Sem equipe? Você pode disputar livremente os torneios Solo/Individual.</span>
                     </div>
                   </div>
                 </div>
@@ -1651,255 +1875,618 @@ export default function ProfileView({
                     Fases & Janelas de Captura
                   </h2>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Acompanhe em tempo real os dias, horários oficiais e palavras-chave de cada etapa dos seus campeonatos.
+                    Acompanhe os dias, horários oficiais, etapas e palavras-chave de todos os seus campeonatos inscritos.
                   </p>
                 </div>
               </div>
 
               {unreadNotifsCount > 0 && (
-                <span className="px-3.5 py-1.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-bold rounded-xl flex items-center gap-1.5 self-start sm:self-auto">
+                <span className="px-3.5 py-1.5 bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-mono font-bold rounded-xl flex items-center gap-1.5 self-start sm:self-auto shadow-lg shadow-rose-950/30">
                   <Bell className="h-3.5 w-3.5 text-rose-400 animate-bounce" />
-                  <span>{unreadNotifsCount} {unreadNotifsCount === 1 ? 'Novo Aviso' : 'Novos Avisos'}</span>
+                  <span>{unreadNotifsCount} {unreadNotifsCount === 1 ? 'Novo Aviso Não Lido' : 'Novos Avisos Não Lidos'}</span>
                 </span>
               )}
+            </div>
+
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800/80 text-center">
+              <div className="bg-[#181a1e] p-3 rounded-2xl border border-slate-800">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block font-bold">Campeonatos Inscritos</span>
+                <span className="text-lg font-black text-white font-mono">{participatingTournaments.length}</span>
+              </div>
+              <div className="bg-[#181a1e] p-3 rounded-2xl border border-slate-800">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block font-bold">Total de Etapas</span>
+                <span className="text-lg font-black text-white font-mono">{userCaptureWindows.length}</span>
+              </div>
+              <div className="bg-[#181a1e] p-3 rounded-2xl border border-emerald-500/20">
+                <span className="text-[10px] font-mono uppercase text-emerald-400 block font-bold">🟢 Etapas Ao Vivo</span>
+                <span className="text-lg font-black text-emerald-400 font-mono">
+                  {userCaptureWindows.filter(w => getCaptureWindowStatus(w).status === 'active').length}
+                </span>
+              </div>
+              <div className="bg-[#181a1e] p-3 rounded-2xl border border-sky-500/20">
+                <span className="text-[10px] font-mono uppercase text-sky-400 block font-bold">⏳ Próximas Etapas</span>
+                <span className="text-lg font-black text-sky-400 font-mono">
+                  {userCaptureWindows.filter(w => getCaptureWindowStatus(w).status === 'upcoming').length}
+                </span>
+              </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            {/* Left Column: Scheduled Capture Windows */}
+            {/* Left Column: Scheduled Capture Windows & Tournament Stage Search */}
             <div className="lg:col-span-8 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-emerald-400" />
-                  <span>Cronograma de Fases ({userCaptureWindows.length})</span>
-                </h3>
+              {/* Search Bar for Tournaments and Stages */}
+              <div className="bg-[#121316] border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-emerald-400" />
+                    <span>Pesquisar Campeonatos & Etapas</span>
+                  </h3>
+                  {participatingTournaments.length > 0 && (
+                    <span className="text-[11px] font-mono text-slate-500">
+                      {participatingTournaments.length} campeonato(s) vinculado(s)
+                    </span>
+                  )}
+                </div>
+
+                {/* Search Input */}
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    value={tournamentSearchQuery}
+                    onChange={(e) => setTournamentSearchQuery(e.target.value)}
+                    placeholder="Pesquisar por campeonato inscrito, etapa, data ou palavra-chave..."
+                    className="w-full bg-[#181a1e] border border-slate-700/80 focus:border-amber-500 text-slate-200 rounded-2xl pl-10 pr-10 py-3 text-xs sm:text-sm font-mono placeholder:text-slate-500 focus:outline-none transition"
+                  />
+                  {tournamentSearchQuery && (
+                    <button
+                      onClick={() => setTournamentSearchQuery('')}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1 cursor-pointer"
+                      title="Limpar busca"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {/* Tournament Filter Pills */}
+                  <button
+                    onClick={() => setTourneyFilterId('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition cursor-pointer flex items-center gap-1.5 border ${
+                      tourneyFilterId === 'all'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md font-black'
+                        : 'bg-[#181a1e] text-slate-400 border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <span>Todos os Campeonatos ({participatingTournaments.length})</span>
+                  </button>
+
+                  {participatingTournaments.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setTourneyFilterId(tourneyFilterId === t.id ? 'all' : t.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition cursor-pointer flex items-center gap-1.5 border truncate max-w-[200px] ${
+                        tourneyFilterId === t.id
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md font-black'
+                          : 'bg-[#181a1e] text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                      title={t.title}
+                    >
+                      <Trophy className="h-3 w-3 shrink-0 text-amber-400" />
+                      <span className="truncate">{t.title}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({t.captureWindows?.length || 0})</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Stage Status Filters */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60">
+                  <span className="text-[10px] font-mono uppercase text-slate-500 font-bold mr-1">Status da Etapa:</span>
+                  {(['all', 'live', 'upcoming', 'ended'] as const).map(st => {
+                    const label = st === 'all' 
+                      ? 'Todas as Etapas' 
+                      : st === 'live' 
+                      ? '🟢 Abertas Agora' 
+                      : st === 'upcoming' 
+                      ? '⏳ Próximas' 
+                      : '🔒 Encerradas';
+                    const count = st === 'all'
+                      ? userCaptureWindows.length
+                      : st === 'live'
+                      ? userCaptureWindows.filter(w => getCaptureWindowStatus(w).status === 'active').length
+                      : st === 'upcoming'
+                      ? userCaptureWindows.filter(w => getCaptureWindowStatus(w).status === 'upcoming').length
+                      : userCaptureWindows.filter(w => getCaptureWindowStatus(w).status === 'ended').length;
+
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => setStageStatusFilter(st)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition cursor-pointer border ${
+                          stageStatusFilter === st
+                            ? 'bg-slate-700 text-white border-slate-600 shadow-sm'
+                            : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        {label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {userCaptureWindows.length === 0 ? (
+              {/* Tournament Stages Results */}
+              {participatingTournaments.length === 0 ? (
                 <div className="bg-[#121316] border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-xl">
                   <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
-                    <Clock className="h-7 w-7" />
+                    <Trophy className="h-7 w-7 text-amber-500" />
                   </div>
                   <div>
-                    <h4 className="text-base font-bold text-white">Nenhuma Janela Específica Cadastrada</h4>
+                    <h4 className="text-base font-bold text-white">Você Ainda Não Está Inscrito em Campeonatos</h4>
                     <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
-                      Os campeonatos em que você está inscrito seguem a janela geral de vigência do torneio, ou a organização ainda irá publicar as etapas.
+                      Inscreva-se em um campeonato ou ative um código de participação para visualizar o cronograma de etapas e horários.
                     </p>
                   </div>
-                  {tournaments.length > 0 && (
+                  {onNavigateToTournaments && (
                     <div className="pt-2">
                       <button
-                        onClick={() => setActiveTab('submit')}
+                        onClick={onNavigateToTournaments}
                         className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer"
                       >
-                        Enviar Captura Geral
+                        Explorar Campeonatos Disponíveis
                       </button>
                     </div>
                   )}
                 </div>
+              ) : (() => {
+                // Filter Tournaments based on search & tournament selector
+                const tourneyQuery = tournamentSearchQuery.trim().toLowerCase();
+                const matchedTournaments = participatingTournaments.filter(tourney => {
+                  if (tourneyFilterId !== 'all' && tourney.id !== tourneyFilterId) {
+                    return false;
+                  }
+                  if (!tourneyQuery) return true;
+
+                  const matchesTitle = tourney.title?.toLowerCase().includes(tourneyQuery);
+                  const matchesFormat = tourney.teamFormat?.toLowerCase().includes(tourneyQuery);
+                  const matchesDescription = tourney.description?.toLowerCase().includes(tourneyQuery);
+                  const matchesSpecies = tourney.targetSpecies?.some(s => s.toLowerCase().includes(tourneyQuery));
+                  const matchesAnyStage = tourney.captureWindows?.some(cw =>
+                    cw.name?.toLowerCase().includes(tourneyQuery) ||
+                    cw.secret?.toLowerCase().includes(tourneyQuery) ||
+                    cw.date?.includes(tourneyQuery) ||
+                    cw.description?.toLowerCase().includes(tourneyQuery)
+                  );
+                  return matchesTitle || matchesFormat || matchesDescription || matchesSpecies || matchesAnyStage;
+                });
+
+                if (matchedTournaments.length === 0) {
+                  return (
+                    <div className="bg-[#121316] border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-xl">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+                        <Search className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Nenhum Campeonato ou Etapa Encontrada</h4>
+                        <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                          Nenhum resultado corresponde à busca "{tournamentSearchQuery}".
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setTournamentSearchQuery('');
+                          setTourneyFilterId('all');
+                          setStageStatusFilter('all');
+                        }}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        Limpar Filtros e Busca
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-6">
+                    {matchedTournaments.map(tourney => {
+                      // Filter stages for this tournament
+                      const windows = tourney.captureWindows || [];
+                      const filteredWindows = windows.filter(w => {
+                        const statusInfo = getCaptureWindowStatus(w);
+                        if (stageStatusFilter === 'live' && statusInfo.status !== 'active') return false;
+                        if (stageStatusFilter === 'upcoming' && statusInfo.status !== 'upcoming') return false;
+                        if (stageStatusFilter === 'ended' && statusInfo.status !== 'ended') return false;
+
+                        if (!tourneyQuery) return true;
+                        const matchStageName = w.name?.toLowerCase().includes(tourneyQuery);
+                        const matchSecret = w.secret?.toLowerCase().includes(tourneyQuery);
+                        const matchDate = w.date?.includes(tourneyQuery);
+                        const matchDesc = w.description?.toLowerCase().includes(tourneyQuery);
+                        const matchTourney = tourney.title?.toLowerCase().includes(tourneyQuery);
+                        return matchStageName || matchSecret || matchDate || matchDesc || matchTourney;
+                      });
+
+                      return (
+                        <div
+                          key={tourney.id}
+                          className="bg-[#121316] border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4"
+                        >
+                          {/* Tournament Header Bar */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold uppercase border border-amber-500/30">
+                                  {tourney.teamFormat === 'solo' ? '👤 Individual' : tourney.teamFormat === 'dupla' ? '👥 Dupla' : `👥 Equipe (${tourney.teamFormat})`}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase border ${
+                                  tourney.status === 'active' 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' 
+                                    : tourney.status === 'upcoming' 
+                                    ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' 
+                                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                                }`}>
+                                  {tourney.status === 'active' ? '🟢 Campeonato Em Andamento' : tourney.status === 'upcoming' ? '⏳ Em Breve' : '🔒 Encerrado'}
+                                </span>
+                              </div>
+
+                              <h3 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
+                                <Trophy className="h-5 w-5 text-amber-400 shrink-0" />
+                                <span>{tourney.title}</span>
+                              </h3>
+
+                              {tourney.targetSpecies && tourney.targetSpecies.length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                  <span className="text-[10px] font-mono text-slate-500 uppercase font-bold">Espécies:</span>
+                                  {tourney.targetSpecies.map(sp => (
+                                    <span key={sp} className="text-[10px] font-mono text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700">
+                                      🐟 {sp}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                setSelectedTournamentId(tourney.id);
+                                setActiveTab('submit');
+                              }}
+                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 self-start sm:self-center shadow-lg shadow-emerald-950/40"
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                              <span>Enviar Captura</span>
+                            </button>
+                          </div>
+
+                          {/* Stages List */}
+                          {windows.length === 0 ? (
+                            <div className="bg-[#181a1e] border border-slate-800/90 rounded-2xl p-4 sm:p-5 text-center space-y-2">
+                              <Calendar className="h-5 w-5 text-slate-500 mx-auto" />
+                              <h5 className="text-xs font-bold text-slate-300">Janela Geral de Vigência</h5>
+                              <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                                Este torneio não possui janelas fracionadas por etapas; os envios de capturas ficam abertos durante todo o período oficial do campeonato ({tourney.startDate ? tourney.startDate.split('-').reverse().join('/') : 'Início'} até {tourney.endDate ? tourney.endDate.split('-').reverse().join('/') : 'Fim'}).
+                              </p>
+                            </div>
+                          ) : filteredWindows.length === 0 ? (
+                            <div className="bg-[#181a1e] border border-slate-800/90 rounded-2xl p-4 text-center text-xs text-slate-500">
+                              Nenhuma etapa deste campeonato corresponde ao filtro de status selecionado.
+                            </div>
+                          ) : (
+                            <div className="space-y-3.5">
+                              {filteredWindows.map((win, sIdx) => {
+                                const statusInfo = getCaptureWindowStatus(win);
+                                return (
+                                  <div
+                                    key={win.id || sIdx}
+                                    className="bg-[#181a1e] border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 sm:p-5 transition space-y-3.5 shadow-sm"
+                                  >
+                                    {/* Stage Title & Live Status */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-8 h-8 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center text-xs font-mono font-black text-amber-400">
+                                          {sIdx + 1}ª
+                                        </div>
+                                        <div>
+                                          <h4 className="text-sm sm:text-base font-black text-white tracking-tight">
+                                            {win.name || `Etapa ${sIdx + 1}`}
+                                          </h4>
+                                          <span className="text-[10px] font-mono text-slate-400">
+                                            Fase oficial de homologação
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <span className={`px-3 py-1 rounded-xl text-xs font-mono font-bold border self-start sm:self-auto ${statusInfo.badgeClass}`}>
+                                        {statusInfo.label}
+                                      </span>
+                                    </div>
+
+                                    {/* Grid: Date & Time */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#121316] p-3 rounded-xl border border-slate-800/80">
+                                      <div className="space-y-0.5">
+                                        <span className="text-[9px] font-mono uppercase text-slate-500 block font-bold">Data da Etapa:</span>
+                                        <div className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 font-mono">
+                                          <Calendar className="h-3.5 w-3.5 text-sky-400" />
+                                          <span>{win.date ? win.date.split('-').reverse().join('/') : 'Data a definir'}</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-0.5">
+                                        <span className="text-[9px] font-mono uppercase text-slate-500 block font-bold">Horário de Captura:</span>
+                                        <div className="text-xs sm:text-sm font-black text-white flex items-center gap-1.5 font-mono">
+                                          <Clock className="h-3.5 w-3.5 text-amber-400" />
+                                          <span>{win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Antifraud Secret Code Box */}
+                                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                      <div className="space-y-0.5">
+                                        <span className="text-[9px] font-mono font-bold uppercase text-amber-300">
+                                          Chave Antifraude Obrigatória da Etapa:
+                                        </span>
+                                        <div className="text-base sm:text-lg font-mono font-black text-amber-400 tracking-widest">
+                                          {win.secret}
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(win.secret);
+                                          setCopiedWindowSecretId(win.id || win.secret);
+                                          setTimeout(() => setCopiedWindowSecretId(null), 2500);
+                                        }}
+                                        className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-lg border border-amber-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                                      >
+                                        {copiedWindowSecretId === (win.id || win.secret) ? (
+                                          <>
+                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                                            <span>Copiada!</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="h-3.5 w-3.5" />
+                                            <span>Copiar Chave</span>
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+
+                                    {win.description && (
+                                      <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
+                                        📝 <strong>Observação da Organização:</strong> {win.description}
+                                      </p>
+                                    )}
+
+                                    {/* Stage Action Button */}
+                                    <div className="flex justify-end pt-1">
+                                      {statusInfo.status === 'active' ? (
+                                        <button
+                                          onClick={() => {
+                                            setSelectedTournamentId(tourney.id);
+                                            setActiveTab('submit');
+                                          }}
+                                          className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-950/40"
+                                        >
+                                          <Send className="h-3.5 w-3.5" />
+                                          <span>Enviar Captura Nesta Fase</span>
+                                        </button>
+                                      ) : statusInfo.status === 'upcoming' ? (
+                                        <div className="px-3 py-1.5 bg-slate-800 text-sky-400 font-bold text-xs rounded-lg border border-slate-700 flex items-center gap-1.5">
+                                          <Clock className="h-3.5 w-3.5 text-sky-400" />
+                                          <span>Abre em {statusInfo.opensInStr || 'Breve'}</span>
+                                        </div>
+                                      ) : (
+                                        <div className="px-3 py-1.5 bg-rose-950/30 text-rose-400 font-bold text-xs rounded-lg border border-rose-800/40 flex items-center gap-1.5">
+                                          <Lock className="h-3.5 w-3.5 text-rose-400" />
+                                          <span>Etapa Encerrada</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Right Column: Notification Feed (Avisos em Tempo Real & Histórico Filtrável) */}
+            <div className="lg:col-span-4 space-y-4">
+              <div className="bg-[#121316] border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-amber-400" />
+                    <span>Avisos & Notificações</span>
+                  </h3>
+                  {unreadNotifsCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-mono font-bold">
+                      {unreadNotifsCount} não lido{unreadNotifsCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+
+                {/* Search Bar for Notifications */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" />
+                  <input
+                    type="text"
+                    value={notifSearchQuery}
+                    onChange={(e) => setNotifSearchQuery(e.target.value)}
+                    placeholder="Buscar em avisos e histórico..."
+                    className="w-full bg-[#181a1e] border border-slate-700/80 focus:border-amber-500 text-slate-200 rounded-xl pl-8 pr-8 py-2 text-xs font-mono placeholder:text-slate-500 focus:outline-none transition"
+                  />
+                  {notifSearchQuery && (
+                    <button
+                      onClick={() => setNotifSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5 cursor-pointer"
+                      title="Limpar busca"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Notification Feed Mode Toggle & Info */}
+                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-800/60">
+                  {notifSearchQuery.trim() ? (
+                    <span className="text-amber-400 font-bold">
+                      🔍 {displayedNotifications.length} resultado(s) da busca
+                    </span>
+                  ) : (
+                    <span>
+                      {unreadNotifsCount > 0 
+                        ? 'Ao marcar como lida, a mensagem sai desta lista.' 
+                        : 'Todos os avisos foram lidos.'}
+                    </span>
+                  )}
+
+                  {!notifSearchQuery.trim() && (
+                    <button
+                      onClick={() => setShowReadNotifsHistory(!showReadNotifsHistory)}
+                      className="text-slate-400 hover:text-amber-400 font-bold underline cursor-pointer"
+                    >
+                      {showReadNotifsHistory ? 'Apenas Não Lidos' : 'Ver Histórico'}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {displayedNotifications.length === 0 ? (
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 text-center shadow-xl space-y-3">
+                  {notifSearchQuery.trim() ? (
+                    <>
+                      <Search className="h-6 w-6 mx-auto text-slate-600" />
+                      <p className="text-xs text-slate-400 font-bold">Nenhum aviso encontrado para esta busca.</p>
+                      <button
+                        onClick={() => setNotifSearchQuery('')}
+                        className="text-[11px] text-amber-400 hover:underline font-mono cursor-pointer"
+                      >
+                        Limpar busca
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400">
+                        <CheckCheck className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white">Nenhum Aviso Pendente</h4>
+                        <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                          Você leu todas as notificações recentes! Para consultar avisos anteriores ou palavras-chave antigas, use a barra de busca acima ou clique em "Ver Histórico".
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setShowReadNotifsHistory(true)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] rounded-lg transition cursor-pointer"
+                      >
+                        Consultar Avisos Lidos
+                      </button>
+                    </>
+                  )}
+                </div>
               ) : (
-                <div className="space-y-3">
-                  {userCaptureWindows.map((win, idx) => {
-                    const statusInfo = getCaptureWindowStatus(win);
+                <div className="space-y-3 max-h-[650px] overflow-y-auto pr-1">
+                  {displayedNotifications.map((notif) => {
+                    const isRead = isNotifReadByUser(notif);
                     return (
                       <div
-                        key={win.id || idx}
-                        className="bg-[#121316] border border-slate-800 hover:border-slate-700 rounded-3xl p-5 sm:p-6 shadow-xl transition space-y-4"
+                        key={notif.id}
+                        className={`p-4 rounded-2xl border transition space-y-2.5 ${
+                          isRead
+                            ? 'bg-[#14161a] border-slate-800/80 text-slate-400'
+                            : 'bg-amber-500/10 border-amber-500/40 text-slate-200 shadow-lg shadow-amber-950/20'
+                        }`}
                       >
-                        {/* Top: Tournament Title & Status */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
-                          <div>
-                            <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider block">
-                              {win.tournamentTitle}
-                            </span>
-                            <h4 className="text-base font-black text-white uppercase tracking-tight">
-                              {win.name || `Etapa ${idx + 1}`}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full shrink-0 ${isRead ? 'bg-slate-600' : 'bg-amber-400 animate-ping'}`} />
+                            <h4 className={`text-xs font-bold ${isRead ? 'text-slate-300' : 'text-white'}`}>
+                              {notif.title}
                             </h4>
                           </div>
 
-                          <span className={`px-3 py-1 rounded-xl text-xs font-mono font-bold border self-start sm:self-auto ${statusInfo.badgeClass}`}>
-                            {statusInfo.label}
-                          </span>
-                        </div>
-
-                        {/* Middle: Details Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#181a1e] p-4 rounded-2xl border border-slate-800/80">
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-mono uppercase text-slate-500 block">Data da Etapa:</span>
-                            <div className="text-sm font-black text-white flex items-center gap-1.5 font-mono">
-                              <Calendar className="h-4 w-4 text-sky-400" />
-                              <span>{win.date ? win.date.split('-').reverse().join('/') : 'Data a definir'}</span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-mono uppercase text-slate-500 block">Horário de Captura:</span>
-                            <div className="text-sm font-black text-white flex items-center gap-1.5 font-mono">
-                              <Clock className="h-4 w-4 text-amber-400" />
-                              <span>{win.startTime || '06:00'} às {win.endTime || '18:00'}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Antifraud Secret Code Box */}
-                        <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="space-y-0.5">
-                            <span className="text-[10px] font-mono font-bold uppercase text-amber-300">
-                              Chave Antifraude Obrigatória da Etapa:
-                            </span>
-                            <div className="text-lg font-mono font-black text-amber-400 tracking-widest">
-                              {win.secret}
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(win.secret);
-                              setCopiedWindowSecretId(win.id || win.secret);
-                              setTimeout(() => setCopiedWindowSecretId(null), 2500);
-                            }}
-                            className="px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
-                          >
-                            {copiedWindowSecretId === (win.id || win.secret) ? (
-                              <>
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                                <span>Copiada!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3.5 w-3.5" />
-                                <span>Copiar Chave</span>
-                              </>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {notif.type === 'capture_window_added' && (
+                              <span className="text-[9px] font-mono uppercase bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
+                                Nova Etapa
+                              </span>
                             )}
-                          </button>
+                            {isRead && (
+                              <span className="text-[9px] font-mono uppercase bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold">
+                                ✓ Lido
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {win.description && (
-                          <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                            📝 <strong>Observação:</strong> {win.description}
-                          </p>
-                        )}
+                        <p className="text-xs leading-relaxed text-slate-300">
+                          {notif.message}
+                        </p>
 
-                        {/* Action: Jump to Submit Catch or show status */}
-                        <div className="flex justify-end pt-1">
-                          {statusInfo.status === 'active' ? (
+                        {/* Highlighted Keyword Box in Notification */}
+                        {notif.windowSecret && (
+                          <div className="bg-[#181a1e] border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] font-mono uppercase text-amber-400 font-bold block">
+                                Palavra-Chave da Etapa:
+                              </span>
+                              <span className="text-xs sm:text-sm font-mono font-black text-amber-300 tracking-wider">
+                                {notif.windowSecret}
+                              </span>
+                            </div>
                             <button
                               onClick={() => {
-                                if (win.tournamentId) setSelectedTournamentId(win.tournamentId);
-                                setActiveTab('submit');
+                                navigator.clipboard.writeText(notif.windowSecret || '');
+                                setCopiedWindowSecretId(notif.id || notif.windowSecret);
+                                setTimeout(() => setCopiedWindowSecretId(null), 2500);
                               }}
-                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-950/40"
+                              className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] rounded-lg border border-amber-500/30 transition cursor-pointer flex items-center gap-1 shrink-0"
                             >
-                              <Send className="h-3.5 w-3.5" />
-                              <span>Enviar Captura Nesta Fase</span>
+                              {copiedWindowSecretId === (notif.id || notif.windowSecret) ? (
+                                <>
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                                  <span>Copiada!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3 w-3" />
+                                  <span>Copiar</span>
+                                </>
+                              )}
                             </button>
-                          ) : statusInfo.status === 'upcoming' ? (
-                            <div className="px-4 py-2 bg-slate-800/60 text-sky-400 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5 cursor-not-allowed">
-                              <Clock className="h-3.5 w-3.5 text-sky-400" />
-                              <span>Aguardando Abertura ({statusInfo.opensInStr || 'Em Breve'})</span>
-                            </div>
-                          ) : (
-                            <div className="px-4 py-2 bg-rose-950/30 text-rose-400 font-bold text-xs rounded-xl border border-rose-800/40 flex items-center gap-1.5 cursor-not-allowed">
-                              <Lock className="h-3.5 w-3.5 text-rose-400" />
-                              <span>Etapa Encerrada - Envios Bloqueados</span>
-                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500 font-mono">
+                          <span>
+                            {notif.createdAt 
+                              ? new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                              : ''}
+                          </span>
+
+                          {!isRead && (
+                            <button
+                              onClick={() => handleMarkNotificationRead(notif.id)}
+                              className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                            >
+                              Marcar como lida
+                            </button>
                           )}
                         </div>
                       </div>
                     );
                   })}
-                </div>
-              )}
-            </div>
-
-            {/* Right Column: Notification Feed (Avisos em Tempo Real) */}
-            <div className="lg:col-span-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-mono font-bold uppercase text-slate-300 tracking-wider flex items-center gap-2">
-                  <Bell className="h-4 w-4 text-amber-400" />
-                  <span>Avisos & Notificações ({relevantNotifications.length})</span>
-                </h3>
-              </div>
-
-              {relevantNotifications.length === 0 ? (
-                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-6 text-center text-xs text-slate-500 shadow-xl space-y-2">
-                  <Bell className="h-6 w-6 mx-auto text-slate-600" />
-                  <p>Você não possui nenhum aviso no momento.</p>
-                </div>
-              ) : (
-                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                  {relevantNotifications.map((notif) => (
-                    <div
-                      key={notif.id}
-                      className={`p-4 rounded-2xl border transition space-y-2.5 ${
-                        notif.isRead
-                          ? 'bg-[#14161a] border-slate-800/80 text-slate-400'
-                          : 'bg-amber-500/10 border-amber-500/40 text-slate-200 shadow-lg'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${notif.isRead ? 'bg-slate-600' : 'bg-amber-400 animate-ping'}`} />
-                          <h4 className="text-xs font-bold text-white">{notif.title}</h4>
-                        </div>
-                        {notif.type === 'capture_window_added' && (
-                          <span className="text-[9px] font-mono uppercase bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
-                            Nova Etapa
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="text-xs leading-relaxed text-slate-300">
-                        {notif.message}
-                      </p>
-
-                      {/* Highlighted Keyword Box in Notification */}
-                      {notif.windowSecret && (
-                        <div className="bg-[#181a1e] border border-amber-500/30 rounded-xl p-2.5 flex items-center justify-between gap-2">
-                          <div className="space-y-0.5">
-                            <span className="text-[9px] font-mono uppercase text-amber-400 font-bold block">
-                              Palavra-Chave da Etapa:
-                            </span>
-                            <span className="text-xs sm:text-sm font-mono font-black text-amber-300 tracking-wider">
-                              {notif.windowSecret}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(notif.windowSecret || '');
-                              setCopiedWindowSecretId(notif.id || notif.windowSecret);
-                              setTimeout(() => setCopiedWindowSecretId(null), 2500);
-                            }}
-                            className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] rounded-lg border border-amber-500/30 transition cursor-pointer flex items-center gap-1 shrink-0"
-                          >
-                            {copiedWindowSecretId === (notif.id || notif.windowSecret) ? (
-                              <>
-                                <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                                <span>Copiada!</span>
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3 w-3" />
-                                <span>Copiar</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500 font-mono">
-                        <span>{notif.createdAt ? new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                        {!notif.isRead && (
-                          <button
-                            onClick={() => handleMarkNotificationRead(notif.id)}
-                            className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
-                          >
-                            Marcar como lida
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
@@ -2365,6 +2952,174 @@ export default function ProfileView({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 6: SUPORTE & ATENDIMENTO AO USUÁRIO */}
+      {/* ========================================================================= */}
+      {activeTab === 'support' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Form to open support ticket */}
+            <div className="lg:col-span-6 bg-[#121316] border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+              <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
+                <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20">
+                  <MessageCircle className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase">Falar com o Administrador</h3>
+                  <p className="text-xs text-slate-400">Envie suas dúvidas, solicitações ou relatórios diretamente à equipe</p>
+                </div>
+              </div>
+
+              {supportSuccessMsg && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs flex items-center gap-3">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                  <span>{supportSuccessMsg}</span>
+                </div>
+              )}
+
+              {supportErrorMsg && (
+                <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-2xl text-xs flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-rose-400 shrink-0" />
+                  <span>{supportErrorMsg}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSendSupport} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                    Assunto da Mensagem *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Dúvida sobre código, erro de envio, alteração cadastral..."
+                    value={supportSubject}
+                    onChange={(e) => setSupportSubject(e.target.value)}
+                    className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
+                    Mensagem Detalhada *
+                  </label>
+                  <textarea
+                    rows={5}
+                    placeholder="Descreva sua solicitação com o máximo de detalhes para agilizar o atendimento..."
+                    value={supportMessageText}
+                    onChange={(e) => setSupportMessageText(e.target.value)}
+                    className="w-full bg-[#1b1e22] border border-slate-800 focus:border-emerald-500 text-white rounded-xl px-4 py-3 text-xs sm:text-sm focus:outline-none resize-none"
+                    required
+                  />
+                </div>
+
+                <div className="p-3 bg-[#181a1e] rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1 font-mono">
+                  <p><strong>Remetente:</strong> {currentUser.displayName || currentUser.fullName} ({currentUser.email})</p>
+                  {currentUser.cpf && <p><strong>CPF:</strong> {currentUser.cpf}</p>}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSendingSupport}
+                  className="w-full py-3.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl transition cursor-pointer shadow-lg shadow-emerald-950/60 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>{isSendingSupport ? 'Enviando Mensagem...' : 'Enviar Mensagem ao Admin'}</span>
+                </button>
+              </form>
+
+              {/* Direct WhatsApp contact */}
+              <div className="pt-4 border-t border-slate-800">
+                <a
+                  href="https://wa.me/5519987626991?text=Ol%C3%A1%2C%20sou%20competidor%20da%20Fisgada%20Pro%20e%20preciso%20de%20suporte%20no%20aplicativo."
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow"
+                >
+                  <MessageCircle className="h-4 w-4 text-emerald-400" />
+                  <span>Atendimento Rápido via WhatsApp Oficial (19 98762-6991)</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Right Column: History of Support Tickets */}
+            <div className="lg:col-span-6 space-y-4">
+              <div className="flex items-center justify-between pb-2">
+                <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-emerald-400" />
+                  <span>Seus Chamados de Suporte ({userSupportTickets.length})</span>
+                </h3>
+              </div>
+
+              {userSupportTickets.length === 0 ? (
+                <div className="bg-[#121316] border border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xl">
+                  <div className="h-10 w-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
+                    <MessageCircle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white uppercase">Nenhum chamado aberto</h4>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                      Suas mensagens enviadas ao Administrador e as respostas oficiais aparecerão aqui.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {userSupportTickets.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      className={`bg-[#121316] border rounded-3xl p-5 shadow-xl space-y-3.5 transition ${
+                        ticket.status === 'answered'
+                          ? 'border-emerald-500/40'
+                          : 'border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-mono font-bold uppercase px-2.5 py-0.5 rounded-full mb-1.5 ${
+                            ticket.status === 'answered'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          }`}>
+                            {ticket.status === 'answered' ? '🟢 Respondida pelo Suporte' : '🟡 Aguardando Resposta'}
+                          </span>
+                          <h4 className="text-sm font-bold text-white">{ticket.subject}</h4>
+                        </div>
+
+                        <button
+                          onClick={() => handleDeleteSupportTicket(ticket.id)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer shrink-0"
+                          title="Excluir do histórico"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      <div className="bg-[#181a1e] p-3.5 rounded-2xl border border-slate-800/80 text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
+                        {ticket.message}
+                      </div>
+
+                      {/* Admin Response Box */}
+                      {ticket.adminResponse && (
+                        <div className="bg-emerald-950/30 border border-emerald-500/30 p-4 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Resposta do Administrador ({ticket.answeredByName || 'ADMIN'}):</span>
+                          </div>
+                          <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap font-sans">
+                            {ticket.adminResponse}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

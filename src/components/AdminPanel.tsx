@@ -54,9 +54,10 @@ import {
   CheckCircle,
   CalendarCheck,
   Crown,
-  Medal
+  Medal,
+  Phone
 } from 'lucide-react';
-import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner } from '../types';
+import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner, SupportMessage } from '../types';
 import { 
   updateCatchStatus, 
   createTournament, 
@@ -81,7 +82,10 @@ import {
   formatExactDateTime,
   getCaptureWindowStatus,
   getTournamentLiveStatus,
-  finalizeTournamentWithChampions
+  finalizeTournamentWithChampions,
+  subscribeSupportMessages,
+  respondToSupportMessage,
+  deleteSupportMessage
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
@@ -327,6 +331,13 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [phaseKeyError, setPhaseKeyError] = useState<string>('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  // Support Messages State
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [supportFilter, setSupportFilter] = useState<'all' | 'open' | 'answered'>('all');
+  const [selectedTicketToReply, setSelectedTicketToReply] = useState<SupportMessage | null>(null);
+  const [replyMessageText, setReplyMessageText] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
+
   // Sync selectedTourneyForPhase with tournaments list
   useEffect(() => {
     if (tournaments.length > 0 && !selectedTourneyForPhase) {
@@ -355,6 +366,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   useEffect(() => {
     const unsubscribe = subscribeTeams((teams) => {
       setAllTeams(teams);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to support messages for admin
+  useEffect(() => {
+    const unsubscribe = subscribeSupportMessages((msgs) => {
+      setSupportMessages(msgs);
     });
     return () => unsubscribe();
   }, []);
@@ -1360,6 +1379,51 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     });
   };
 
+  // Support: Respond to Ticket
+  const handleReplySupportTicket = async (ticket: SupportMessage) => {
+    if (!replyMessageText.trim()) {
+      showFlashMessage('Escreva uma resposta para o pescador.', 'error');
+      return;
+    }
+
+    setIsSendingReply(true);
+    try {
+      await respondToSupportMessage(
+        ticket.id,
+        replyMessageText.trim(),
+        currentUser?.uid || 'admin',
+        currentUser?.displayName || 'ADMIN'
+      );
+      showFlashMessage(`✅ Resposta enviada com sucesso para ${ticket.userName}!`, 'success');
+      setSelectedTicketToReply(null);
+      setReplyMessageText('');
+    } catch (err: any) {
+      showFlashMessage('Erro ao responder chamado: ' + err.message, 'error');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  // Support: Delete Ticket
+  const handleDeleteSupportTicketAdmin = (ticket: SupportMessage) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Excluir Mensagem de Suporte',
+      message: `Tem certeza que deseja excluir este chamado de "${ticket.userName}" (${ticket.subject})?`,
+      confirmLabel: 'Sim, Excluir',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteSupportMessage(ticket.id);
+          showFlashMessage('🗑️ Mensagem de suporte excluída.', 'success');
+        } catch (err: any) {
+          showFlashMessage('Erro ao excluir mensagem: ' + err.message, 'error');
+        }
+      }
+    });
+  };
+
   // Capture Windows: Delete capture window
   const handleDeleteCaptureWindow = async (tournamentId: string, tournamentTitle: string, windowId: string, windowName: string) => {
     setConfirmDialog({
@@ -1429,21 +1493,32 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       {/* Main Admin Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-1">
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono font-bold">
-              <ShieldCheck className="h-4 w-4" />
-              <span>
-                {isSuperAdmin ? 'Painel do Administrador Geral (Proprietário)' : `Painel do Moderador (${currentUser?.displayName || 'Árbitro'})`}
-              </span>
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border-2 border-amber-500/30 flex items-center justify-center font-black text-amber-400 overflow-hidden shadow-lg shrink-0">
+              {currentUser?.photoURL ? (
+                <img
+                  src={currentUser.photoURL}
+                  alt="ADMIN"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <ShieldCheck className="h-7 w-7 text-amber-400" />
+              )}
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Central de Arbitragem & Gestão Administrativa
-            </h2>
-            <p className="text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
-              {isSuperAdmin 
-                ? 'Controle total do sistema: homologue capturas com IA, cadastre campeonatos com proteção de segurança, gerencie pescadores e credencie moderadores.'
-                : 'Acesse as funções autorizadas para a comissão técnica de arbitragem.'}
-            </p>
+
+            <div className="space-y-1">
+              <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono font-bold">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>ADMIN</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+                Central de Arbitragem & Gestão
+              </h2>
+              <p className="text-slate-400 text-xs max-w-xl">
+                Homologue capturas, gerencie campeonatos, chaves antifraude e atenda chamados de suporte dos competidores.
+              </p>
+            </div>
           </div>
 
           {/* Quick Metrics */}
@@ -1567,6 +1642,24 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               <span>Chaves Antifraude</span>
             </button>
           )}
+
+          {/* Suporte Tab (Mensagens dos Usuários) */}
+          <button
+            onClick={() => setActiveSection('support')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+              activeSection === 'support'
+                ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20 font-extrabold'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <MessageCircle className="h-4 w-4 text-sky-400" />
+            <span>Suporte ({supportMessages.length})</span>
+            {supportMessages.filter(m => m.status === 'open').length > 0 && (
+              <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[10px] rounded-full font-black animate-pulse">
+                {supportMessages.filter(m => m.status === 'open').length} nova(s)
+              </span>
+            )}
+          </button>
 
           {/* Super Admin Exclusive: Moderator Manager */}
           {canManageModerators && (
@@ -2946,13 +3039,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                                 {team.name}
                               </h4>
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <span className="text-[11px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
                                 {team.code}
                               </span>
-                              <span className="text-[11px] font-mono text-slate-400">
-                                Capitão: {team.creatorName || team.creatorEmail}
-                              </span>
+                              <div className="inline-flex items-center gap-1 text-[11px] font-mono text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                                <Crown className="h-3 w-3 text-amber-400" />
+                                <span>Capitão: <strong className="text-white">{team.creatorName || team.creatorEmail || 'Não identificado'}</strong></span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -4127,6 +4221,293 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           registeredUsers={registeredUsers}
           onFlashMessage={showFlashMessage}
         />
+      )}
+
+      {/* SECTION 7: SUPPORT TICKETS & USER MESSAGES */}
+      {activeSection === 'support' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Support Header & Filter Bar */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-400 text-xs font-mono font-bold">
+                  <MessageCircle className="h-4 w-4" />
+                  <span>Central de Chamados dos Pescadores</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  Mensagens & Dúvidas de Usuários
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-400">
+                  Responda às dúvidas dos competidores em tempo real. As respostas aparecerão diretamente no painel do usuário.
+                </p>
+              </div>
+
+              {/* Status Filter Buttons */}
+              <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800 self-start md:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setSupportFilter('all')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    supportFilter === 'all'
+                      ? 'bg-sky-500 text-slate-950 shadow-md font-extrabold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Todos ({supportMessages.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSupportFilter('open')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    supportFilter === 'open'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>Pendentes</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900 font-mono text-amber-300 font-bold">
+                    {supportMessages.filter(m => m.status === 'open').length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSupportFilter('answered')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    supportFilter === 'answered'
+                      ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>Respondidos</span>
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-900 font-mono text-emerald-300 font-bold">
+                    {supportMessages.filter(m => m.status === 'answered').length}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Ticket List */}
+          {(() => {
+            const filteredTickets = supportMessages.filter(msg => {
+              if (supportFilter === 'open') return msg.status === 'open';
+              if (supportFilter === 'answered') return msg.status === 'answered';
+              return true;
+            });
+
+            if (filteredTickets.length === 0) {
+              return (
+                <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
+                  <div className="w-16 h-16 rounded-3xl bg-slate-800/80 border border-slate-700 mx-auto flex items-center justify-center text-slate-500">
+                    <MessageSquare className="h-8 w-8" />
+                  </div>
+                  <h4 className="text-base font-bold text-white">Nenhum chamado encontrado</h4>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    {supportFilter === 'open' 
+                      ? 'Parabéns! Todos os chamados de suporte dos competidores foram respondidos.'
+                      : 'Nenhuma mensagem de suporte enviada nesta categoria.'}
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {filteredTickets.map((ticket) => {
+                  const isReplyingThis = selectedTicketToReply?.id === ticket.id;
+                  const isAnswered = ticket.status === 'answered';
+
+                  return (
+                    <div
+                      key={ticket.id}
+                      className={`bg-slate-900 border rounded-3xl p-6 transition shadow-xl space-y-4 ${
+                        !isAnswered
+                          ? 'border-amber-500/40 bg-amber-500/[0.02]'
+                          : 'border-slate-800'
+                      }`}
+                    >
+                      {/* Ticket Card Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center font-black text-sky-400 shrink-0">
+                            {ticket.userName ? ticket.userName.charAt(0).toUpperCase() : 'U'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-extrabold text-white text-sm">{ticket.userName}</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${
+                                isAnswered
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
+                              }`}>
+                                {isAnswered ? '✅ Respondida' : '⏳ Aguardando Resposta'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-400 font-mono flex items-center gap-3 flex-wrap">
+                              <span>{ticket.userEmail}</span>
+                              {ticket.userPhone && (
+                                <span className="text-slate-500">• Tel: {ticket.userPhone}</span>
+                              )}
+                              <span>• {new Date(ticket.createdAt).toLocaleString('pt-BR')}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Top Actions */}
+                        <div className="flex items-center gap-2 self-end sm:self-auto">
+                          {ticket.userPhone && (
+                            <a
+                              href={`https://wa.me/55${ticket.userPhone.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                            >
+                              <Phone className="h-3.5 w-3.5" />
+                              <span>WhatsApp</span>
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSupportTicketAdmin(ticket)}
+                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                            title="Excluir Chamado"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Subject & User Message */}
+                      <div className="space-y-2">
+                        <div className="text-sm font-bold text-sky-400 flex items-center gap-2">
+                          <Tag className="h-4 w-4" />
+                          <span>Assunto: {ticket.subject}</span>
+                        </div>
+                        <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-2xl text-slate-200 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
+                          {ticket.message}
+                        </div>
+                      </div>
+
+                      {/* Existing Admin Response (if answered) */}
+                      {ticket.adminResponse && (
+                        <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                              <ShieldCheck className="h-4 w-4" />
+                              Resposta do ADMIN ({ticket.adminName || 'ADMIN'}):
+                            </span>
+                            {ticket.answeredAt && (
+                              <span className="text-slate-400 font-mono text-[10px]">
+                                {new Date(ticket.answeredAt).toLocaleString('pt-BR')}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs sm:text-sm text-emerald-200 whitespace-pre-wrap leading-relaxed">
+                            {ticket.adminResponse}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Reply Composer Form */}
+                      {isReplyingThis ? (
+                        <div className="p-4 bg-slate-950 border border-sky-500/40 rounded-2xl space-y-3 animate-fade-in">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-mono font-bold text-sky-300 uppercase block">
+                              Escrever Resposta Oficial ao Pescador:
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTicketToReply(null);
+                                setReplyMessageText('');
+                              }}
+                              className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+
+                          {/* Quick Presets */}
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setReplyMessageText('Olá! Sua dúvida foi esclarecida e seu cadastro/solicitação foi devidamente regularizado. Qualquer outra dúvida estamos à disposição!')}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                            >
+                              + Regularizado com sucesso
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReplyMessageText('Olá! Verificamos sua captura e as fotos foram reanalisadas pela comissão de arbitragem. Obrigado pelo contato.')}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                            >
+                              + Análise de Captura
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReplyMessageText('Olá! Para transferências de equipe ou chave antifraude, por favor consulte a aba Chaves Antifraude no seu painel ou aguarde o prazo de 7 dias.')}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                            >
+                              + Prazo de Equipe (7 dias)
+                            </button>
+                          </div>
+
+                          <textarea
+                            rows={4}
+                            value={replyMessageText}
+                            onChange={(e) => setReplyMessageText(e.target.value)}
+                            placeholder="Digite sua resposta aqui para que o usuário receba na aba Suporte do perfil dele..."
+                            className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl p-3 text-xs sm:text-sm focus:outline-none focus:border-sky-500 leading-relaxed"
+                          />
+
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTicketToReply(null);
+                                setReplyMessageText('');
+                              }}
+                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSendingReply || !replyMessageText.trim()}
+                              onClick={() => handleReplySupportTicket(ticket)}
+                              className="px-5 py-2 bg-sky-500 hover:bg-sky-400 text-slate-950 rounded-xl text-xs font-extrabold transition cursor-pointer shadow-lg shadow-sky-950/40 flex items-center gap-2 disabled:opacity-50"
+                            >
+                              <Send className="h-4 w-4" />
+                              <span>{isSendingReply ? 'Enviando...' : 'Enviar Resposta ao Pescador'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedTicketToReply(ticket);
+                              setReplyMessageText(ticket.adminResponse || '');
+                            }}
+                            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+                              isAnswered
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                : 'bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-lg shadow-sky-500/20'
+                            }`}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            <span>{isAnswered ? 'Editar Resposta' : 'Responder Chamado'}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
       )}
 
       {/* MODAL: EDIT TOURNAMENT MODAL */}

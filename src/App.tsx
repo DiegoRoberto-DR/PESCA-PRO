@@ -28,6 +28,8 @@ import ChampionsView from './components/ChampionsView';
 import ProfileView from './components/ProfileView';
 import SubmitCatchForm from './components/SubmitCatchForm';
 import AdminPanel from './components/AdminPanel';
+import AboutUsView from './components/AboutUsView';
+import HowToParticipateView from './components/HowToParticipateView';
 import AuthModal from './components/AuthModal';
 import ParticipateModal from './components/ParticipateModal';
 import { Tournament, Catch, UserProfile } from './types';
@@ -200,6 +202,14 @@ export default function App() {
                       </button>
 
                       <button
+                        onClick={() => setCurrentTab('how-to-participate')}
+                        className="w-full sm:w-auto px-8 py-4 bg-slate-900/90 hover:bg-slate-800 text-slate-100 font-bold text-xs sm:text-sm uppercase tracking-wider rounded-2xl border border-[#00c853]/40 backdrop-blur-md transition-all transform hover:-translate-y-0.5 cursor-pointer text-center flex items-center justify-center gap-2"
+                      >
+                        <HelpCircle className="h-4 w-4 text-[#00c853]" />
+                        <span>COMO PARTICIPAR</span>
+                      </button>
+
+                      <button
                         onClick={() => setCurrentTab('ranking')}
                         className="w-full sm:w-auto px-8 py-4 bg-[#12141a]/80 hover:bg-[#1a1d26] text-white font-bold text-xs sm:text-sm uppercase tracking-wider rounded-2xl border border-slate-700/80 backdrop-blur-md transition-all transform hover:-translate-y-0.5 cursor-pointer text-center"
                       >
@@ -363,6 +373,22 @@ export default function App() {
               )
             )}
 
+            {/* ABA COMO PARTICIPAR */}
+            {currentTab === 'how-to-participate' && (
+              <HowToParticipateView 
+                onNavigateToTournaments={() => setCurrentTab('tournaments')}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                isLoggedIn={currentUser !== null}
+              />
+            )}
+
+            {/* ABA QUEM SOMOS */}
+            {currentTab === 'about' && (
+              <AboutUsView 
+                onNavigateToTournaments={() => setCurrentTab('tournaments')}
+              />
+            )}
+
             {/* ABA ADMIN (Exclusiva para Administradores e Moderadores) */}
             {currentTab === 'admin' && (
               (currentUser?.role === 'admin' || currentUser?.role === 'moderator') ? (
@@ -473,6 +499,14 @@ export default function App() {
         onRequireAuth={() => {
           setIsParticipateModalOpen(false);
           setIsAuthModalOpen(true);
+        }}
+        onNavigateToProfile={() => {
+          setIsParticipateModalOpen(false);
+          setCurrentTab('profile');
+        }}
+        onNavigateToTournaments={() => {
+          setIsParticipateModalOpen(false);
+          setCurrentTab('tournaments');
         }}
         onSuccessEnroll={(t) => {
           if (currentUser) {

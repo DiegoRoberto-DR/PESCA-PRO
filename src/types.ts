@@ -24,6 +24,7 @@ export interface AppNotification {
   windowEndTime?: string;
   windowSecret?: string;
   readBy?: string[]; // userIds que marcaram como lido
+  isRead?: boolean;
   createdAt: any;
 }
 

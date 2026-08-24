@@ -88,6 +88,24 @@ export default function SubmitCatchForm({
     };
   }, [currentUser?.uid]);
 
+  // Filter tournaments: if user is in a team (duo, trio, etc.), hide solo tournaments completely so they cannot submit to solo tournaments
+  const availableTournaments = tournaments.filter(t => {
+    if (userTeam && t.teamFormat === 'solo') {
+      return false;
+    }
+    return true;
+  });
+
+  // Ensure selected tournament is valid within availableTournaments
+  React.useEffect(() => {
+    if (availableTournaments.length > 0) {
+      const exists = availableTournaments.some(t => t.id === selectedTournamentId);
+      if (!exists) {
+        setSelectedTournamentId(availableTournaments[0].id);
+      }
+    }
+  }, [userTeam, availableTournaments, selectedTournamentId]);
+
   // AI Validation variables
   const [isVerifyingAI, setIsVerifyingAI] = useState<boolean>(false);
   const [aiFeedback, setAiFeedback] = useState<Catch['aiFeedback'] | null>(null);
@@ -388,10 +406,10 @@ export default function SubmitCatchForm({
             }}
             className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-sky-500 text-xs sm:text-sm cursor-pointer"
           >
-            {tournaments.length === 0 && (
-              <option disabled>Nenhum campeonato cadastrado</option>
+            {availableTournaments.length === 0 && (
+              <option disabled>Nenhum campeonato disponível</option>
             )}
-            {tournaments.map((t) => {
+            {availableTournaments.map((t) => {
               const live = getTournamentLiveStatus(t, now);
               const isClosed = t.status === 'completed';
               return (
@@ -568,7 +586,9 @@ export default function SubmitCatchForm({
                 className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:border-sky-500 text-xs sm:text-sm disabled:opacity-50"
               />
             </div>
-            <span className="text-[9px] text-slate-500 font-mono">Do focinho até a ponta da cauda sobre fita visível.</span>
+            <span className="text-[9px] text-emerald-400 font-mono">
+              ✓ Medição obrigatória sobre a Régua Oficial FISGADA PRO (boca no marco zero).
+            </span>
           </div>
 
           {/* Weight */}
