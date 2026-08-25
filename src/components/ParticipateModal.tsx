@@ -8,6 +8,7 @@ interface ParticipateModalProps {
   onClose: () => void;
   tournament: Tournament | null;
   currentUser: UserProfile | null;
+  initialCode?: string;
   onRequireAuth: () => void;
   onSuccessEnroll?: (tournament: Tournament) => void;
   onNavigateToProfile?: () => void;
@@ -19,17 +20,25 @@ export default function ParticipateModal({
   onClose,
   tournament,
   currentUser,
+  initialCode,
   onRequireAuth,
   onSuccessEnroll,
   onNavigateToProfile,
   onNavigateToTournaments
 }: ParticipateModalProps) {
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode || '');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [userTeam, setUserTeam] = useState<Team | null>(null);
   const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setCode(initialCode || '');
+      setError('');
+    }
+  }, [isOpen, initialCode]);
 
   useEffect(() => {
     if (isOpen && currentUser && tournament && tournament.teamFormat && tournament.teamFormat !== 'solo') {

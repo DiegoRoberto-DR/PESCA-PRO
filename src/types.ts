@@ -28,17 +28,47 @@ export interface AppNotification {
   createdAt: any;
 }
 
+export interface PointRule {
+  id: string;
+  species?: string; // Espécie específica ou 'all'
+  minCm?: number; // Tamanho mínimo em cm (inclusive)
+  maxCm?: number; // Tamanho máximo em cm (inclusive)
+  points: number; // Quantidade de pontos atribuídos
+  description?: string; // Rótulo descritivo (ex: "30 a 39 cm = 10 pts")
+}
+
+export interface SpeciesBonusRule {
+  species: string;
+  bonusPoints: number;
+  description?: string;
+}
+
+export interface TournamentPointsConfig {
+  enabled: boolean;
+  scoringMode?: 'ranges' | 'per_cm' | 'fish_count' | 'custom_rules';
+  pointsPerFish?: number; // Pontos base fixos por peixe aprovado (ex: 1 ponto)
+  pointsPerCm?: number; // Pontos multiplicados por centímetro (ex: 1 pt/cm)
+  minValidLength?: number; // Tamanho mínimo para peixe ter validade/pontuar (ex: 25 cm)
+  rules?: PointRule[]; // Faixas de tamanho configuradas
+  pointRules?: PointRule[]; // Alias de rules para compatibilidade
+  speciesBonus?: SpeciesBonusRule[]; // Bônus por espécie nobre
+  customNotes?: string;
+}
+
 export interface TournamentWinner {
+  position?: number; // 1, 2, 3, 4, 5, etc.
   userId?: string;
   userName: string;
   userEmail?: string;
   teamId?: string;
   teamName?: string;
   teamLogo?: string;
-  trophy?: string; // Ex: "1º Lugar Geral - Campeão Ouro"
+  trophy?: string; // Ex: "1º Lugar Geral - Campeão Ouro", "2º Lugar - Vice-Campeão", "3º Lugar", "4º Lugar", "5º Lugar"
   catchSize?: number; // Ex: 68.5 (cm)
+  points?: number; // Pontos do competidor
   species?: string; // Ex: "Tucunaré Azul"
   photoUrl?: string;
+  prize?: string; // Prêmio específico do lugar (ex: "Troféu + Barco de Alumínio", "Troféu + R$ 2.000")
   notes?: string;
 }
 
@@ -51,7 +81,8 @@ export interface Tournament {
   endDate: string;
   status: 'active' | 'upcoming' | 'completed';
   targetSpecies: string[];
-  metric: 'length' | 'weight' | 'both';
+  metric: 'length' | 'weight' | 'both' | 'points';
+  pointsConfig?: TournamentPointsConfig; // Sistema e regras de pontuação
   prize: string;
   prizeValue?: number;
   entryFeeType: 'gratis' | 'pago';
@@ -68,6 +99,8 @@ export interface Tournament {
   championInfo?: TournamentWinner;
   runnerUpInfo?: TournamentWinner;
   thirdPlaceInfo?: TournamentWinner;
+  winners?: TournamentWinner[]; // Lista dinâmica de vencedores do pódio (1º, 2º, 3º, 4º, 5º, etc. configurável pelo Admin)
+  closingNotes?: string;
   completedAt?: any;
 }
 
@@ -120,6 +153,8 @@ export interface Catch {
   species: string;
   length: number; // in cm
   weight?: number; // in kg (optional)
+  points?: number; // Pontos oficiais calculados para esta captura
+  pointsBreakdown?: string; // Detalhamento dos pontos (ex: "1 pt base + 15 pts faixa 40-49cm")
   location: string;
   photoUrl: string; // Base64 or standard URL
   videoStartUrl?: string; // URL Vídeo Início (Fisgada)

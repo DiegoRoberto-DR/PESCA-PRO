@@ -47,6 +47,9 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
   };
 
   const getMetricName = (metric: Tournament['metric']) => {
+    if (metric === 'points' || tournament.pointsConfig?.enabled) {
+      return '⭐ Sistema de Pontuação (Pts)';
+    }
     switch (metric) {
       case 'length':
         return 'Maior Comprimento (cm)';
@@ -54,6 +57,8 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
         return 'Maior Peso (kg)';
       case 'both':
         return 'Comprimento (cm) e Peso (kg)';
+      default:
+        return 'Maior Comprimento (cm)';
     }
   };
 
@@ -148,6 +153,18 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
               </strong></span>
             </div>
           </div>
+
+          {/* Points rules tag if enabled */}
+          {(tournament.pointsConfig?.enabled || tournament.metric === 'points') && (
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-[11px] font-mono text-amber-400">
+              <span className="font-bold flex items-center gap-1.5">
+                ⭐ Pontuação por Peixe / Faixas
+              </span>
+              <span className="text-[10px] text-amber-300/80">
+                {tournament.pointsConfig?.pointRules?.length || tournament.pointsConfig?.rules?.length || 0} faixas ativas
+              </span>
+            </div>
+          )}
 
           {/* Info grid */}
           <div className="grid grid-cols-2 gap-3 border-y border-slate-800 py-3.5 text-xs">

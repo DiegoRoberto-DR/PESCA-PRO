@@ -16,7 +16,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification, SupportMessage } from '../types';
+import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification, SupportMessage, TournamentPointsConfig, PointRule, SpeciesBonusRule, TournamentWinner } from '../types';
 
 // Helper to remove any undefined fields before sending to Firestore (prevents Firebase Unsupported undefined errors)
 export function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
@@ -286,11 +286,11 @@ export async function submitCatch(catchData: Omit<Catch, 'id' | 'createdAt' | 's
   return docRef.id;
 }
 
-// Finalize Tournament and Crown Champions
+// Finalize Tournament and Crown Champions with flexible podium (1st, 2nd, 3rd, 4th, 5th, etc.)
 export async function finalizeTournamentWithChampions(
   tournamentId: string,
   tournamentTitle: string,
-  champion: any,
+  championOrWinners: any,
   runnerUp?: any,
   thirdPlace?: any,
   closingNotes?: string
@@ -302,26 +302,52 @@ export async function finalizeTournamentWithChampions(
     completedAt: new Date().toISOString()
   };
 
-  if (champion) {
-    updatePayload.championInfo = cleanFirestoreData(champion);
+  let winnersList: TournamentWinner[] = [];
+
+  if (Array.isArray(championOrWinners)) {
+    winnersList = championOrWinners.filter(w => w && w.userName && w.userName.trim() !== '');
+  } else if (championOrWinners && typeof championOrWinners === 'object') {
+    if (championOrWinners.userName) {
+      winnersList.push({ position: 1, trophy: '1º Lugar - Grande Campeão', ...championOrWinners });
+    }
+    if (runnerUp && runnerUp.userName) {
+      winnersList.push({ position: 2, trophy: '2º Lugar - Vice-Campeão', ...runnerUp });
+    }
+    if (thirdPlace && thirdPlace.userName) {
+      winnersList.push({ position: 3, trophy: '3º Lugar - Bronze', ...thirdPlace });
+    }
   }
-  if (runnerUp) {
-    updatePayload.runnerUpInfo = cleanFirestoreData(runnerUp);
+
+  if (winnersList.length > 0) {
+    updatePayload.winners = cleanFirestoreData(winnersList);
+    updatePayload.championInfo = cleanFirestoreData(winnersList[0]);
+    if (winnersList[1]) {
+      updatePayload.runnerUpInfo = cleanFirestoreData(winnersList[1]);
+    }
+    if (winnersList[2]) {
+      updatePayload.thirdPlaceInfo = cleanFirestoreData(winnersList[2]);
+    }
   }
-  if (thirdPlace) {
-    updatePayload.thirdPlaceInfo = cleanFirestoreData(thirdPlace);
+
+  if (closingNotes) {
+    updatePayload.closingNotes = closingNotes;
   }
 
   await updateDoc(tourRef, cleanFirestoreData(updatePayload));
 
   // Send Celebration Broadcast Notification
   try {
-    const champName = champion?.userName || 'Pescador Vencedor';
+    const champName = winnersList[0]?.userName || 'Pescador Vencedor';
+    const totalPodium = winnersList.length;
+    const podiumMsg = totalPodium > 1
+      ? `Parabéns ao grande Campeão ${champName} 🥇 e aos premiados do 1º ao ${totalPodium}º lugar!`
+      : `Parabéns ao grande Campeão ${champName} 🥇!`;
+
     const notifData: Omit<AppNotification, 'id'> = {
       tournamentId,
       tournamentTitle,
       title: `🏆 CAMPEONATO ENCERRADO: ${tournamentTitle}`,
-      message: `O campeonato foi finalizado com sucesso! Parabéns ao grande Campeão: ${champName} 🥇! Confira o pódio oficial e o ranking final no app.`,
+      message: `O campeonato foi finalizado com sucesso! ${podiumMsg} Confira o pódio oficial no app.`,
       type: 'tournament_update',
       readBy: [],
       createdAt: serverTimestamp()
@@ -370,13 +396,145 @@ export async function enrollUserInTournament(userId: string, tournamentId: strin
 export async function updateCatchStatus(
   catchId: string, 
   status: 'approved' | 'rejected', 
-  moderatorNotes?: string
+  moderatorNotes?: string,
+  extraData?: { points?: number; pointsBreakdown?: string }
 ): Promise<void> {
   const docRef = doc(db, 'catches', catchId);
-  await updateDoc(docRef, {
+  const payload: any = {
     status,
     moderatorNotes: moderatorNotes || ""
-  });
+  };
+  if (extraData?.points !== undefined) {
+    payload.points = extraData.points;
+  }
+  if (extraData?.pointsBreakdown !== undefined) {
+    payload.pointsBreakdown = extraData.pointsBreakdown;
+  }
+  await updateDoc(docRef, cleanFirestoreData(payload));
+}
+
+// Calculate points for a catch based on tournament scoring configuration
+export function calculateCatchPoints(
+  catchItemOrLength: { length: number; weight?: number; species?: string } | number,
+  tournamentOrSpeciesOrConfig?: Tournament | TournamentPointsConfig | string | null,
+  maybeConfig?: TournamentPointsConfig | null
+): { points: number; breakdown: string; isValid: boolean } {
+  let length = 0;
+  let species = '';
+  let cfg: TournamentPointsConfig | undefined;
+  let tournamentMetric: string | undefined;
+
+  if (typeof catchItemOrLength === 'number') {
+    length = catchItemOrLength;
+    if (typeof tournamentOrSpeciesOrConfig === 'string') {
+      species = tournamentOrSpeciesOrConfig;
+      cfg = maybeConfig || undefined;
+    } else if (tournamentOrSpeciesOrConfig && typeof tournamentOrSpeciesOrConfig === 'object') {
+      if ('pointsConfig' in tournamentOrSpeciesOrConfig) {
+        cfg = (tournamentOrSpeciesOrConfig as Tournament).pointsConfig;
+        tournamentMetric = (tournamentOrSpeciesOrConfig as Tournament).metric;
+      } else {
+        cfg = tournamentOrSpeciesOrConfig as TournamentPointsConfig;
+      }
+    }
+  } else if (catchItemOrLength && typeof catchItemOrLength === 'object') {
+    length = Number(catchItemOrLength.length) || 0;
+    species = catchItemOrLength.species || '';
+    if (tournamentOrSpeciesOrConfig && typeof tournamentOrSpeciesOrConfig === 'object') {
+      if ('pointsConfig' in tournamentOrSpeciesOrConfig) {
+        cfg = (tournamentOrSpeciesOrConfig as Tournament).pointsConfig;
+        tournamentMetric = (tournamentOrSpeciesOrConfig as Tournament).metric;
+      } else {
+        cfg = tournamentOrSpeciesOrConfig as TournamentPointsConfig;
+      }
+    }
+  }
+
+  species = species.trim().toLowerCase();
+
+  // If points config is not enabled and metric is not points, default point = length cm
+  if (!cfg || !cfg.enabled) {
+    if (tournamentMetric === 'points') {
+      const pts = Math.round(length);
+      return {
+        points: pts,
+        breakdown: `${length} cm = ${pts} pts (1 pt por cm)`,
+        isValid: true
+      };
+    }
+    return {
+      points: Math.round(length),
+      breakdown: `${length} cm`,
+      isValid: true
+    };
+  }
+
+  // Check minimum valid length
+  if (cfg.minValidLength && length < cfg.minValidLength) {
+    return {
+      points: 0,
+      breakdown: `Tamanho abaixo do mínimo (${cfg.minValidLength} cm). Não pontuou.`,
+      isValid: false
+    };
+  }
+
+  let totalPoints = 0;
+  const breakdownParts: string[] = [];
+
+  // 1. Base points per approved fish (e.g. 1 point for any valid fish)
+  if (cfg.pointsPerFish && cfg.pointsPerFish > 0) {
+    totalPoints += cfg.pointsPerFish;
+    breakdownParts.push(`${cfg.pointsPerFish} pt${cfg.pointsPerFish > 1 ? 's' : ''} (base por peixe)`);
+  }
+
+  // 2. Points per cm (e.g. 1 pt/cm)
+  if (cfg.pointsPerCm && cfg.pointsPerCm > 0) {
+    const cmPts = Math.round(length * cfg.pointsPerCm * 10) / 10;
+    totalPoints += cmPts;
+    breakdownParts.push(`${cmPts} pts (${length} cm × ${cfg.pointsPerCm} pt/cm)`);
+  }
+
+  // 3. Size ranges rules (faixas de tamanho)
+  const allRules = cfg.rules || cfg.pointRules || [];
+  if (allRules.length > 0) {
+    let matchedRule = null;
+    for (const rule of allRules) {
+      const minOk = rule.minCm === undefined || rule.minCm === null || length >= rule.minCm;
+      const maxOk = rule.maxCm === undefined || rule.maxCm === null || length <= rule.maxCm;
+      const speciesOk = !rule.species || rule.species === 'all' || rule.species.toLowerCase() === species;
+      if (minOk && maxOk && speciesOk) {
+        matchedRule = rule;
+        break;
+      }
+    }
+
+    if (matchedRule) {
+      totalPoints += matchedRule.points;
+      breakdownParts.push(`${matchedRule.points} pts (${matchedRule.description || `Faixa ${matchedRule.minCm || 0} a ${matchedRule.maxCm || '∞'} cm`})`);
+    }
+  }
+
+  // 4. Species Bonus
+  if (cfg.speciesBonus && cfg.speciesBonus.length > 0) {
+    const bonus = cfg.speciesBonus.find(b => b.species && b.species.toLowerCase() === species);
+    if (bonus && bonus.bonusPoints > 0) {
+      totalPoints += bonus.bonusPoints;
+      breakdownParts.push(`+${bonus.bonusPoints} pts (bônus espécie: ${bonus.species})`);
+    }
+  }
+
+  // If no points rule fired, fallback to at least 1 pt per fish or length
+  if (totalPoints === 0 && allRules.length === 0 && !cfg.pointsPerCm && !cfg.pointsPerFish) {
+    totalPoints = 1;
+    breakdownParts.push('1 pt (peixe aprovado)');
+  }
+
+  const finalPts = Math.round(totalPoints * 10) / 10;
+  return {
+    points: finalPts,
+    breakdown: breakdownParts.join(' + ') || `${finalPts} pts`,
+    isValid: true
+  };
 }
 
 // Update a tournament

@@ -32,6 +32,7 @@ import AboutUsView from './components/AboutUsView';
 import HowToParticipateView from './components/HowToParticipateView';
 import AuthModal from './components/AuthModal';
 import ParticipateModal from './components/ParticipateModal';
+import OfficialRulerModal from './components/OfficialRulerModal';
 import { Tournament, Catch, UserProfile } from './types';
 import { seedTournamentsIfNeeded, subscribeTournaments, subscribeCatches } from './utils/dbHelpers';
 
@@ -50,7 +51,9 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isSubmitCatchOpen, setIsSubmitCatchOpen] = useState<boolean>(false);
   const [isParticipateModalOpen, setIsParticipateModalOpen] = useState<boolean>(false);
+  const [isRulerModalOpen, setIsRulerModalOpen] = useState<boolean>(false);
   const [participateTournament, setParticipateTournament] = useState<Tournament | null>(null);
+  const [participateInitialCode, setParticipateInitialCode] = useState<string>('');
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
 
   // Seed and subscribe to collections on boot
@@ -98,8 +101,9 @@ export default function App() {
     setCurrentTab('home');
   };
 
-  const handleParticipate = (tournament: Tournament) => {
+  const handleParticipate = (tournament: Tournament, initialCode?: string) => {
     setParticipateTournament(tournament);
+    setParticipateInitialCode(initialCode || '');
     setIsParticipateModalOpen(true);
   };
 
@@ -138,6 +142,7 @@ export default function App() {
         setCurrentTab={setCurrentTab} 
         user={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenRulerModal={() => setIsRulerModalOpen(true)}
         onLogout={handleLogout}
       />
 
@@ -363,6 +368,13 @@ export default function App() {
                     tournaments={tournaments}
                     selectedTournament={selectedTournament}
                     onNavigateToTournaments={() => setCurrentTab('tournaments')}
+                    onSelectTournament={(t) => {
+                      setSelectedTournament(t);
+                      setCurrentTab('ranking');
+                    }}
+                    onOpenParticipateModal={(t, code) => {
+                      handleParticipate(t, code);
+                    }}
                     onOpenSubmitCatch={() => {
                       setSelectedTournament(null);
                       setIsSubmitCatchOpen(true);
@@ -378,6 +390,7 @@ export default function App() {
               <HowToParticipateView 
                 onNavigateToTournaments={() => setCurrentTab('tournaments')}
                 onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onOpenRulerModal={() => setIsRulerModalOpen(true)}
                 isLoggedIn={currentUser !== null}
               />
             )}
@@ -493,9 +506,13 @@ export default function App() {
       {/* Participate in Tournament Dialog */}
       <ParticipateModal
         isOpen={isParticipateModalOpen}
-        onClose={() => setIsParticipateModalOpen(false)}
+        onClose={() => {
+          setIsParticipateModalOpen(false);
+          setParticipateInitialCode('');
+        }}
         tournament={participateTournament}
         currentUser={currentUser}
+        initialCode={participateInitialCode}
         onRequireAuth={() => {
           setIsParticipateModalOpen(false);
           setIsAuthModalOpen(true);
@@ -523,6 +540,12 @@ export default function App() {
           setSelectedTournament(t);
           setCurrentTab('profile');
         }}
+      />
+
+      {/* Official Ruler Showcase & Purchase Dialog */}
+      <OfficialRulerModal
+        isOpen={isRulerModalOpen}
+        onClose={() => setIsRulerModalOpen(false)}
       />
     </div>
   );

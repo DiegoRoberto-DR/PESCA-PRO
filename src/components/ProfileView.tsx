@@ -43,7 +43,8 @@ import {
   Inbox,
   Eye,
   X,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Crown
 } from 'lucide-react';
 import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification, SupportMessage } from '../types';
 import { 
@@ -76,6 +77,8 @@ interface ProfileViewProps {
   tournaments: Tournament[];
   selectedTournament?: Tournament | null;
   onNavigateToTournaments?: () => void;
+  onSelectTournament?: (tournament: Tournament) => void;
+  onOpenParticipateModal?: (tournament: Tournament, code?: string) => void;
   onOpenSubmitCatch?: () => void;
   onLogout: () => void;
 }
@@ -86,6 +89,8 @@ export default function ProfileView({
   tournaments,
   selectedTournament,
   onNavigateToTournaments,
+  onSelectTournament,
+  onOpenParticipateModal,
   onLogout
 }: ProfileViewProps) {
   // Navigation tabs in profile
@@ -475,35 +480,67 @@ export default function ProfileView({
     reader.readAsDataURL(file);
   };
 
-  const handleActivateCode = async (codeItem: TournamentCode) => {
-    if (!codeItem.tournamentId || !codeItem.code) return;
-    setCodeActionResult(null);
-    setActivatingCodeId(codeItem.id);
+  const isCaptain = Boolean(
+    userTeam && (
+      userTeam.creatorId === currentUser.uid ||
+      (currentUser.email && userTeam.creatorEmail && userTeam.creatorEmail.toLowerCase() === currentUser.email.toLowerCase()) ||
+      userTeam.members?.some(m => m.userId === currentUser.uid && m.role === 'captain')
+    )
+  );
 
-    try {
-      const res = await validateAndConsumeTournamentCode(codeItem.tournamentId, codeItem.code, currentUser);
-      if (res.success) {
-        setCodeActionResult({
-          type: 'success',
-          message: res.message || 'Código ativado com sucesso! Você está inscrito no torneio.'
-        });
-        if (!selectedTournamentId) {
-          setSelectedTournamentId(codeItem.tournamentId);
-        }
-      } else {
-        setCodeActionResult({
-          type: 'error',
-          message: res.message || 'Não foi possível validar este código.'
-        });
-      }
-    } catch (err: any) {
-      setCodeActionResult({
-        type: 'error',
-        message: 'Erro ao ativar código: ' + (err.message || 'Tente novamente.')
-      });
-    } finally {
-      setActivatingCodeId(null);
+  // User Requirement: Tournament codes for team-based tournaments (duo up to 5 people) must ONLY be shown to the Captain
+  const visibleUserCodes = userCodes.filter((c) => {
+    const tourney = tournaments.find(t => t.id === c.tournamentId);
+    const isTeamTournament = Boolean(
+      (tourney && tourney.teamFormat && tourney.teamFormat !== 'solo') ||
+      c.code?.startsWith('EQP-') ||
+      (c.maxParticipants && c.maxParticipants > 1) ||
+      (c.category && c.category !== 'solo')
+    );
+
+    if (isTeamTournament) {
+      // Must be captain to see and activate team tournament codes
+      return isCaptain;
     }
+
+    // Solo tournament codes are visible to the user
+    return true;
+  });
+
+  const handleActivateCode = async (codeItem: TournamentCode) => {
+    if (!codeItem.code) return;
+    setActivatingCodeId(codeItem.id);
+    setCodeActionResult(null);
+
+    // Auto copy code to clipboard
+    try {
+      await navigator.clipboard.writeText(codeItem.code);
+      setCopiedCodeId(codeItem.id);
+    } catch (e) {
+      console.warn("Não foi possível copiar:", e);
+    }
+
+    const targetTourney = tournaments.find(t => t.id === codeItem.tournamentId);
+
+    setCodeActionResult({
+      type: 'success',
+      message: `Código ${codeItem.code} copiado! Redirecionando direto para o torneio ${targetTourney?.title ? `"${targetTourney.title}"` : ''} para ativação...`
+    });
+
+    setTimeout(() => {
+      setActivatingCodeId(null);
+      if (targetTourney) {
+        if (onOpenParticipateModal) {
+          onOpenParticipateModal(targetTourney, codeItem.code);
+        } else if (onSelectTournament) {
+          onSelectTournament(targetTourney);
+        } else if (onNavigateToTournaments) {
+          onNavigateToTournaments();
+        }
+      } else if (onNavigateToTournaments) {
+        onNavigateToTournaments();
+      }
+    }, 700);
   };
 
   // Team Actions
@@ -809,7 +846,6 @@ export default function ProfileView({
     }
   };
 
-  const isCaptain = userTeam && (userTeam.creatorId === currentUser.uid || userTeam.members.some(m => m.userId === currentUser.uid && m.role === 'captain'));
   const isTeamComplete = userTeam && userTeam.members && userTeam.members.length >= userTeam.maxMembers;
 
   return (
@@ -904,11 +940,11 @@ export default function ProfileView({
           >
             <Ticket className="h-4 w-4" />
             <span>Códigos de Inscrição</span>
-            {userCodes.length > 0 && (
+            {visibleUserCodes.length > 0 && (
               <span className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
                 activeTab === 'codes' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}>
-                {userCodes.length}
+                {visibleUserCodes.length}
               </span>
             )}
           </button>
@@ -1225,21 +1261,38 @@ export default function ProfileView({
               </div>
             )}
 
-            {userCodes.length === 0 ? (
+            {/* Notice for non-captain team members */}
+            {userTeam && !isCaptain && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-3">
+                <Crown className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-bold text-white block">Equipe: {userTeam.name}</span>
+                  <p className="text-slate-300 leading-relaxed">
+                    Você está registrado como membro da equipe. Os códigos de participação em campeonatos de equipe (Dupla, Trio, Quarteto ou Quinteto) são disponibilizados e gerenciados exclusivamente pelo <strong>Capitão</strong> da equipe ({userTeam.creatorName || userTeam.creatorEmail || 'Capitão'}).
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {visibleUserCodes.length === 0 ? (
               <div className="py-12 text-center space-y-4">
                 <div className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-500">
                   <Ticket className="h-6 w-6" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-300">Nenhum código atribuído ainda</h4>
+                  <h4 className="text-sm font-bold text-slate-300">
+                    {userTeam && !isCaptain ? 'Nenhum código individual disponível' : 'Nenhum código atribuído ainda'}
+                  </h4>
                   <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-                    Assim que o Administrador gerar seu código exclusivo para um campeonato, ele aparecerá aqui com opção de ativação imediata.
+                    {userTeam && !isCaptain
+                      ? 'Inscrições em torneios de equipes são ativadas diretamente pelo Capitão da sua equipe.'
+                      : 'Assim que o Administrador gerar seu código exclusivo para um campeonato, ele aparecerá aqui com opção de ativação imediata.'}
                   </p>
                 </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {userCodes.map((c) => {
+                {visibleUserCodes.map((c) => {
                   const isActivating = activatingCodeId === c.id;
                   const isCopied = copiedCodeId === c.id;
 
@@ -1297,7 +1350,7 @@ export default function ProfileView({
                         </div>
                       </div>
 
-                      {/* Action Button: 1-Click Activate */}
+                      {/* Action Button: 1-Click Activate and Redirect */}
                       <div>
                         {c.isUsed ? (
                           <div className="w-full py-2.5 text-center text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
@@ -1310,7 +1363,7 @@ export default function ProfileView({
                             className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer shadow-lg shadow-amber-950/40 flex items-center justify-center gap-2 disabled:opacity-50"
                           >
                             {isActivating ? (
-                              <span>Ativando Inscrição...</span>
+                              <span>Carregando Torneio...</span>
                             ) : (
                               <>
                                 <Key className="h-4 w-4" />

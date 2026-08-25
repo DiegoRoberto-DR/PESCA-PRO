@@ -22,30 +22,45 @@ import {
   ChevronDown,
   ChevronUp,
   MessageCircle,
-  ExternalLink
+  ExternalLink,
+  Maximize2
 } from 'lucide-react';
+import OfficialRulerGraphic from './OfficialRulerGraphic';
+import OfficialRulerModal from './OfficialRulerModal';
 
 interface HowToParticipateViewProps {
   onNavigateToTournaments?: () => void;
   onOpenAuthModal?: () => void;
+  onOpenRulerModal?: () => void;
   isLoggedIn?: boolean;
 }
 
 export default function HowToParticipateView({
   onNavigateToTournaments,
   onOpenAuthModal,
+  onOpenRulerModal,
   isLoggedIn = false
 }: HowToParticipateViewProps) {
   // FAQ accordion state
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [isLocalRulerModalOpen, setIsLocalRulerModalOpen] = useState(false);
+
+  const handleOpenRuler = () => {
+    if (onOpenRulerModal) {
+      onOpenRulerModal();
+    } else {
+      setIsLocalRulerModalOpen(true);
+    }
+  };
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
   };
 
   const organizerWhatsApp = '5519987626991';
+  const rulerPrice = '70,00';
   const whatsappReguaUrl = `https://wa.me/${organizerWhatsApp}?text=${encodeURIComponent(
-    'Olá! Gostaria de adquirir a Régua Oficial FISGADA PRO para participar dos torneios oficiais de pesca esportiva.'
+    'Olá! Gostaria de adquirir a Régua Oficial FISGADA PRO (100cm) no valor de R$ 70,00 para participar dos torneios oficiais de pesca esportiva.'
   )}`;
   const whatsappInscricaoUrl = `https://wa.me/${organizerWhatsApp}?text=${encodeURIComponent(
     'Olá! Gostaria de tirar dúvidas sobre a taxa de inscrição e receber meu código de participação no torneio.'
@@ -154,24 +169,40 @@ export default function HowToParticipateView({
               <Ruler className="h-32 w-32 text-[#00c853]" />
             </div>
 
-            <div className="space-y-4 relative z-10">
-              <div className="flex items-center justify-between">
+            <div className="space-y-5 relative z-10">
+              <div className="flex items-center justify-between gap-2">
                 <div className="w-12 h-12 rounded-2xl bg-[#00c853]/15 border border-[#00c853]/30 flex items-center justify-center text-[#00c853]">
                   <Ruler className="h-6 w-6" />
                 </div>
-                <span className="px-3 py-1 bg-[#00c853]/20 border border-[#00c853]/40 text-[#00c853] text-[10px] font-mono font-black uppercase rounded-full tracking-wider">
-                  OBRIGATÓRIA E EXCLUSIVA
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-black rounded-full tracking-wider">
+                    VALOR: R$ {rulerPrice}
+                  </span>
+                  <span className="px-2.5 py-1 bg-[#00c853]/20 border border-[#00c853]/40 text-[#00c853] text-[10px] font-mono font-black uppercase rounded-full tracking-wider hidden sm:inline-block">
+                    OBRIGATÓRIA
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  1. Régua Oficial FISGADA PRO
+                </h3>
+                <span className="text-xs font-mono text-[#00c853] font-bold">
+                  Padrão 100 cm • Escala Neon UV • QR Antifraude
                 </span>
               </div>
 
-              <h3 className="text-xl sm:text-2xl font-black text-white">
-                1. Régua Oficial FISGADA PRO
-              </h3>
-
               <div className="space-y-3 text-xs sm:text-sm text-slate-300 leading-relaxed">
                 <p>
-                  Para que qualquer captura seja homologada pela comissão técnica e pelos algoritmos de visão computacional, o peixe deve ser obrigatoriamente medido sobre a <strong>Régua Oficial Homologada da FISGADA PRO</strong>.
+                  Para que qualquer captura seja homologada pela comissão técnica e pelos algoritmos de visão computacional, o peixe deve ser obrigatoriamente medido sobre a <strong>Régua Oficial Homologada da FISGADA PRO</strong> (100 cm).
                 </p>
+
+                {/* Compact Visual Ruler Preview inside Pilar 1 */}
+                <div className="pt-1">
+                  <OfficialRulerGraphic compact onOpenZoom={handleOpenRuler} />
+                </div>
+
                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-2">
                   <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4 text-[#00c853]" />
@@ -179,7 +210,7 @@ export default function HowToParticipateView({
                   </h4>
                   <ul className="space-y-1.5 text-xs text-slate-400 list-disc list-inside">
                     <li><strong className="text-slate-200">Encosto de Bico a 90°:</strong> Garante o posicionamento perfeito da boca do peixe no marco zero absoluto.</li>
-                    <li><strong className="text-slate-200">Escala de Alta Precisão:</strong> Numeração com contraste milimétrico calibrado que impede fraudes de perspectiva.</li>
+                    <li><strong className="text-slate-200">Escala de Alta Precisão (1 Metro):</strong> Numeração com contraste milimétrico calibrado que impede fraudes de perspectiva.</li>
                     <li><strong className="text-slate-200">Marcação Holográfica e QR Antifraude:</strong> Verificação instantânea de autenticidade no sistema.</li>
                     <li><strong className="text-rose-400">Atenção:</strong> Réguas caseiras, fitas métricas ou trenas de terceiros <strong>não são aceitas sob nenhuma hipótese</strong>.</li>
                   </ul>
@@ -187,19 +218,33 @@ export default function HowToParticipateView({
               </div>
             </div>
 
-            <div className="pt-2 border-t border-slate-800 relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <span className="text-xs text-slate-400 font-mono">
-                Ainda não tem sua régua?
-              </span>
-              <a
-                href={whatsappReguaUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full sm:w-auto px-5 py-2.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-emerald-950/30"
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span>Solicitar Régua no WhatsApp</span>
-              </a>
+            <div className="pt-3 border-t border-slate-800 relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-baseline gap-1 text-slate-300">
+                <span className="text-xs">Valor:</span>
+                <strong className="text-lg font-black text-white">R$ {rulerPrice}</strong>
+                <span className="text-[10px] text-slate-400 font-mono">/ unidade</span>
+              </div>
+              
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleOpenRuler}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Maximize2 className="h-3.5 w-3.5 text-[#00c853]" />
+                  <span>Ver Detalhes</span>
+                </button>
+
+                <a
+                  href={whatsappReguaUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full sm:w-auto px-5 py-2.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-emerald-950/30"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span>Comprar (R$ 70)</span>
+                </a>
+              </div>
             </div>
           </div>
 
@@ -581,6 +626,12 @@ export default function HowToParticipateView({
           )}
         </div>
       </div>
+
+      {/* RULER DETAIL MODAL */}
+      <OfficialRulerModal
+        isOpen={isLocalRulerModalOpen}
+        onClose={() => setIsLocalRulerModalOpen(false)}
+      />
 
     </div>
   );

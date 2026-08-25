@@ -80,84 +80,166 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
 
     const ranking = Array.from(userTotals.values()).sort((a, b) => b.bestCatch.length - a.bestCatch.length);
     
-    // Check if tournament has explicit official champion crowned
+    // Check if tournament has explicit official champion crowned or full winners list
+    const explicitWinners = tourney.winners && tourney.winners.length > 0 ? tourney.winners : null;
     let champion = ranking[0] || null;
     let runnerUp = ranking[1] || null;
     let thirdPlace = ranking[2] || null;
 
-    if (tourney.championInfo) {
-      champion = {
-        userId: tourney.championInfo.userId || 'official-champ',
-        userName: tourney.championInfo.userName,
-        teamName: tourney.championInfo.teamName,
-        totalLength: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
-        bestCatch: {
-          id: 'champ-catch',
+    if (explicitWinners) {
+      const w1 = explicitWinners.find(w => w.position === 1) || explicitWinners[0];
+      const w2 = explicitWinners.find(w => w.position === 2) || explicitWinners[1];
+      const w3 = explicitWinners.find(w => w.position === 3) || explicitWinners[2];
+
+      if (w1) {
+        champion = {
+          userId: w1.userId || 'champ-1',
+          userName: w1.userName,
+          teamName: w1.teamName,
+          totalLength: w1.catchSize || (ranking[0]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'champ-catch',
+            userId: w1.userId || 'champ-1',
+            userName: w1.userName,
+            userEmail: w1.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: w1.species || 'Tucunaré',
+            length: w1.catchSize || (ranking[0]?.bestCatch.length || 0),
+            photoUrl: w1.photoUrl || (ranking[0]?.bestCatch.photoUrl || ''),
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[0]?.catchesCount || 1
+        };
+      }
+
+      if (w2) {
+        runnerUp = {
+          userId: w2.userId || 'runnerup-2',
+          userName: w2.userName,
+          teamName: w2.teamName,
+          totalLength: w2.catchSize || (ranking[1]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'runnerup-catch',
+            userId: w2.userId || 'runnerup-2',
+            userName: w2.userName,
+            userEmail: w2.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: w2.species || 'Tucunaré',
+            length: w2.catchSize || (ranking[1]?.bestCatch.length || 0),
+            photoUrl: w2.photoUrl || '',
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[1]?.catchesCount || 1
+        };
+      }
+
+      if (w3) {
+        thirdPlace = {
+          userId: w3.userId || 'third-3',
+          userName: w3.userName,
+          teamName: w3.teamName,
+          totalLength: w3.catchSize || (ranking[2]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'third-catch',
+            userId: w3.userId || 'third-3',
+            userName: w3.userName,
+            userEmail: w3.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: w3.species || 'Tucunaré',
+            length: w3.catchSize || (ranking[2]?.bestCatch.length || 0),
+            photoUrl: w3.photoUrl || '',
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[2]?.catchesCount || 1
+        };
+      }
+    } else {
+      if (tourney.championInfo) {
+        champion = {
           userId: tourney.championInfo.userId || 'official-champ',
           userName: tourney.championInfo.userName,
-          userEmail: tourney.championInfo.userEmail || '',
-          tournamentId: tourney.id,
-          tournamentTitle: tourney.title,
-          species: tourney.championInfo.species || 'Tucunaré',
-          length: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
-          photoUrl: tourney.championInfo.photoUrl || (ranking[0]?.bestCatch.photoUrl || ''),
-          location: '',
-          createdAt: new Date(),
-          status: 'approved',
-          verifiedByAI: false
-        },
-        catchesCount: ranking[0]?.catchesCount || 1
-      };
-    }
+          teamName: tourney.championInfo.teamName,
+          totalLength: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'champ-catch',
+            userId: tourney.championInfo.userId || 'official-champ',
+            userName: tourney.championInfo.userName,
+            userEmail: tourney.championInfo.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: tourney.championInfo.species || 'Tucunaré',
+            length: tourney.championInfo.catchSize || (ranking[0]?.bestCatch.length || 0),
+            photoUrl: tourney.championInfo.photoUrl || (ranking[0]?.bestCatch.photoUrl || ''),
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[0]?.catchesCount || 1
+        };
+      }
 
-    if (tourney.runnerUpInfo) {
-      runnerUp = {
-        userId: tourney.runnerUpInfo.userId || 'official-runnerup',
-        userName: tourney.runnerUpInfo.userName,
-        teamName: tourney.runnerUpInfo.teamName,
-        totalLength: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
-        bestCatch: {
-          id: 'runnerup-catch',
+      if (tourney.runnerUpInfo) {
+        runnerUp = {
           userId: tourney.runnerUpInfo.userId || 'official-runnerup',
           userName: tourney.runnerUpInfo.userName,
-          userEmail: tourney.runnerUpInfo.userEmail || '',
-          tournamentId: tourney.id,
-          tournamentTitle: tourney.title,
-          species: tourney.runnerUpInfo.species || 'Tucunaré',
-          length: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
-          photoUrl: tourney.runnerUpInfo.photoUrl || '',
-          location: '',
-          createdAt: new Date(),
-          status: 'approved',
-          verifiedByAI: false
-        },
-        catchesCount: ranking[1]?.catchesCount || 1
-      };
-    }
+          teamName: tourney.runnerUpInfo.teamName,
+          totalLength: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'runnerup-catch',
+            userId: tourney.runnerUpInfo.userId || 'official-runnerup',
+            userName: tourney.runnerUpInfo.userName,
+            userEmail: tourney.runnerUpInfo.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: tourney.runnerUpInfo.species || 'Tucunaré',
+            length: tourney.runnerUpInfo.catchSize || (ranking[1]?.bestCatch.length || 0),
+            photoUrl: tourney.runnerUpInfo.photoUrl || '',
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[1]?.catchesCount || 1
+        };
+      }
 
-    if (tourney.thirdPlaceInfo) {
-      thirdPlace = {
-        userId: tourney.thirdPlaceInfo.userId || 'official-third',
-        userName: tourney.thirdPlaceInfo.userName,
-        teamName: tourney.thirdPlaceInfo.teamName,
-        totalLength: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
-        bestCatch: {
-          id: 'third-catch',
+      if (tourney.thirdPlaceInfo) {
+        thirdPlace = {
           userId: tourney.thirdPlaceInfo.userId || 'official-third',
           userName: tourney.thirdPlaceInfo.userName,
-          userEmail: tourney.thirdPlaceInfo.userEmail || '',
-          tournamentId: tourney.id,
-          tournamentTitle: tourney.title,
-          species: tourney.thirdPlaceInfo.species || 'Tucunaré',
-          length: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
-          photoUrl: tourney.thirdPlaceInfo.photoUrl || '',
-          location: '',
-          createdAt: new Date(),
-          status: 'approved',
-          verifiedByAI: false
-        },
-        catchesCount: ranking[2]?.catchesCount || 1
-      };
+          teamName: tourney.thirdPlaceInfo.teamName,
+          totalLength: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
+          bestCatch: {
+            id: 'third-catch',
+            userId: tourney.thirdPlaceInfo.userId || 'official-third',
+            userName: tourney.thirdPlaceInfo.userName,
+            userEmail: tourney.thirdPlaceInfo.userEmail || '',
+            tournamentId: tourney.id,
+            tournamentTitle: tourney.title,
+            species: tourney.thirdPlaceInfo.species || 'Tucunaré',
+            length: tourney.thirdPlaceInfo.catchSize || (ranking[2]?.bestCatch.length || 0),
+            photoUrl: tourney.thirdPlaceInfo.photoUrl || '',
+            location: '',
+            createdAt: new Date(),
+            status: 'approved',
+            verifiedByAI: false
+          },
+          catchesCount: ranking[2]?.catchesCount || 1
+        };
+      }
     }
 
     return {
@@ -165,10 +247,11 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
       champion,
       runnerUp,
       thirdPlace,
-      totalParticipants: Math.max(ranking.length, tourney.championInfo ? 1 : 0),
+      allWinners: explicitWinners || [],
+      totalParticipants: Math.max(ranking.length, tourney.championInfo || explicitWinners ? 1 : 0),
       totalFishApproved: tourneyCatches.length
     };
-  }).filter(item => item.champion !== null || item.tournament.championInfo !== undefined);
+  }).filter(item => item.champion !== null || item.tournament.championInfo !== undefined || (item.tournament.winners && item.tournament.winners.length > 0));
 
   return (
     <div className="space-y-10 animate-fade-in max-w-6xl mx-auto py-6 sm:py-8">
@@ -319,9 +402,12 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
                         <div className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs">
                           <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono mb-1">
                             <span>2º LUGAR</span>
-                            <span className="text-slate-200 font-bold">{runnerUp.bestCatch.length} cm</span>
+                            {runnerUp.bestCatch.length > 0 && (
+                              <span className="text-slate-200 font-bold">{runnerUp.bestCatch.length} cm</span>
+                            )}
                           </div>
                           <p className="font-bold text-white truncate">{runnerUp.userName}</p>
+                          {runnerUp.teamName && <span className="text-[10px] text-slate-400 block truncate">{runnerUp.teamName}</span>}
                         </div>
                       ) : (
                         <div className="p-3 bg-slate-900/40 rounded-2xl border border-slate-800/60 text-xs text-slate-500 italic">
@@ -333,9 +419,12 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
                         <div className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs">
                           <div className="flex items-center justify-between text-slate-400 text-[10px] font-mono mb-1">
                             <span>3º LUGAR</span>
-                            <span className="text-amber-500 font-bold">{thirdPlace.bestCatch.length} cm</span>
+                            {thirdPlace.bestCatch.length > 0 && (
+                              <span className="text-amber-500 font-bold">{thirdPlace.bestCatch.length} cm</span>
+                            )}
                           </div>
                           <p className="font-bold text-white truncate">{thirdPlace.userName}</p>
+                          {thirdPlace.teamName && <span className="text-[10px] text-slate-400 block truncate">{thirdPlace.teamName}</span>}
                         </div>
                       ) : (
                         <div className="p-3 bg-slate-900/40 rounded-2xl border border-slate-800/60 text-xs text-slate-500 italic">
@@ -343,6 +432,22 @@ export default function ChampionsView({ tournaments, catches, onSelectTournament
                         </div>
                       )}
                     </div>
+
+                    {/* 4th, 5th, etc. Place Podiums */}
+                    {tournament.winners && tournament.winners.filter(w => (w.position || 0) > 3).length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                        {tournament.winners.filter(w => (w.position || 0) > 3).map((w, idx) => (
+                          <div key={idx} className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800/80 text-[11px]">
+                            <div className="flex items-center justify-between text-slate-400 font-mono text-[9px] mb-0.5">
+                              <span>{w.position || idx + 4}º LUGAR</span>
+                              {w.catchSize && <span className="text-slate-300 font-bold">{w.catchSize} cm</span>}
+                            </div>
+                            <p className="font-bold text-slate-200 truncate">{w.userName}</p>
+                            {w.teamName && <span className="text-[9px] text-slate-500 block truncate">{w.teamName}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {onSelectTournament && (

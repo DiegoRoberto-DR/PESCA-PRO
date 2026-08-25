@@ -1,5 +1,5 @@
 import React from 'react';
-import { Anchor, Trophy, Award, Home, Crown, User, LogIn, ShieldCheck, Building2, HelpCircle } from 'lucide-react';
+import { Anchor, Trophy, Award, Home, Crown, User, LogIn, ShieldCheck, Building2, HelpCircle, Ruler } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface NavBarProps {
@@ -7,6 +7,7 @@ interface NavBarProps {
   setCurrentTab: (tab: string) => void;
   user: UserProfile | null;
   onOpenAuthModal: () => void;
+  onOpenRulerModal?: () => void;
   onLogout: () => void;
 }
 
@@ -15,6 +16,7 @@ export default function NavBar({
   setCurrentTab, 
   user, 
   onOpenAuthModal, 
+  onOpenRulerModal,
   onLogout 
 }: NavBarProps) {
   return (
@@ -156,8 +158,20 @@ export default function NavBar({
             )}
           </nav>
 
-          {/* User Profile Summary / Login Button */}
-          <div className="flex items-center space-x-3">
+          {/* User Profile Summary / Ruler Button / Login Button */}
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            {onOpenRulerModal && (
+              <button
+                type="button"
+                onClick={onOpenRulerModal}
+                className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-[#00c853]/15 hover:bg-[#00c853]/25 text-[#00c853] border border-[#00c853]/35 transition cursor-pointer shadow-sm"
+                title="Ver Régua Oficial Fisgada Pro de 100cm (R$ 70)"
+              >
+                <Ruler className="h-3.5 w-3.5" />
+                <span>RÉGUA (R$ 70)</span>
+              </button>
+            )}
+
             {user ? (
               <div className="flex items-center space-x-3">
                 <div 

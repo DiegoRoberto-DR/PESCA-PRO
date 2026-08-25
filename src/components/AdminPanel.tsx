@@ -55,9 +55,10 @@ import {
   CalendarCheck,
   Crown,
   Medal,
-  Phone
+  Phone,
+  Star
 } from 'lucide-react';
-import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner, SupportMessage } from '../types';
+import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner, SupportMessage, PointRule, SpeciesBonusRule, TournamentPointsConfig } from '../types';
 import { 
   updateCatchStatus, 
   createTournament, 
@@ -85,10 +86,12 @@ import {
   finalizeTournamentWithChampions,
   subscribeSupportMessages,
   respondToSupportMessage,
-  deleteSupportMessage
+  deleteSupportMessage,
+  calculateCatchPoints
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
+import TournamentPointsConfigEditor from './TournamentPointsConfigEditor';
 
 interface AdminPanelProps {
   catches: Catch[];
@@ -215,7 +218,21 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [endDate, setEndDate] = useState('2026-12-31');
   const [status, setStatus] = useState<Tournament['status']>('active');
   const [targetSpeciesInput, setTargetSpeciesInput] = useState('Tucunaré');
-  const [metric, setMetric] = useState<'length' | 'weight' | 'both'>('length');
+  const [metric, setMetric] = useState<'length' | 'weight' | 'both' | 'points'>('length');
+  
+  // Points System Configuration State (Creation)
+  const [pointsEnabled, setPointsEnabled] = useState(false);
+  const [pointsPerFish, setPointsPerFish] = useState<number>(1);
+  const [pointsPerCm, setPointsPerCm] = useState<number>(0);
+  const [minValidLength, setMinValidLength] = useState<number>(25);
+  const [pointRules, setPointRules] = useState<PointRule[]>([
+    { id: 'r1', minCm: 25, maxCm: 34.9, points: 10, description: '25cm a 34.9cm' },
+    { id: 'r2', minCm: 35, maxCm: 44.9, points: 20, description: '35cm a 44.9cm' },
+    { id: 'r3', minCm: 45, maxCm: 54.9, points: 40, description: '45cm a 54.9cm' },
+    { id: 'r4', minCm: 55, points: 80, description: '55cm ou mais (Troféu)' }
+  ]);
+  const [speciesBonuses, setSpeciesBonuses] = useState<SpeciesBonusRule[]>([]);
+  
   const [prize, setPrize] = useState('');
   const [prizeValue, setPrizeValue] = useState<string>('');
   const [entryFeeType, setEntryFeeType] = useState<'gratis' | 'pago'>('gratis');
@@ -248,19 +265,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [modalWinError, setModalWinError] = useState('');
   const [modalWinSuccess, setModalWinSuccess] = useState('');
 
-  // Finalize Tournament & Crown Champion Modal State
+  // Finalize Tournament & Crown Champion Modal State (Dynamic Multi-Podium)
   const [finalizingTournament, setFinalizingTournament] = useState<Tournament | null>(null);
-  const [champName, setChampName] = useState('');
-  const [champTeam, setChampTeam] = useState('');
-  const [champTrophy, setChampTrophy] = useState('1º Lugar Geral - Grande Campeão');
-  const [champFishSize, setChampFishSize] = useState('');
-  const [champSpecies, setChampSpecies] = useState('');
-  const [champPhoto, setChampPhoto] = useState('');
-  const [champNotes, setChampNotes] = useState('');
-  const [runnerUpName, setRunnerUpName] = useState('');
-  const [runnerUpTeam, setRunnerUpTeam] = useState('');
-  const [thirdPlaceName, setThirdPlaceName] = useState('');
-  const [thirdPlaceTeam, setThirdPlaceTeam] = useState('');
+  const [podiumWinners, setPodiumWinners] = useState<TournamentWinner[]>([]);
+  const [finalizeClosingNotes, setFinalizeClosingNotes] = useState('');
   const [isFinalizingTourney, setIsFinalizingTourney] = useState(false);
   const [finalizeError, setFinalizeError] = useState('');
 
@@ -277,6 +285,13 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editFeeAmount, setEditFeeAmount] = useState('');
   const [editFormat, setEditFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'>('solo');
   const [editImage, setEditImage] = useState('');
+  const [editMetric, setEditMetric] = useState<'length' | 'weight' | 'both' | 'points'>('length');
+  const [editPointsEnabled, setEditPointsEnabled] = useState(false);
+  const [editPointsPerFish, setEditPointsPerFish] = useState<number>(1);
+  const [editPointsPerCm, setEditPointsPerCm] = useState<number>(0);
+  const [editMinValidLength, setEditMinValidLength] = useState<number>(25);
+  const [editPointRules, setEditPointRules] = useState<PointRule[]>([]);
+  const [editSpeciesBonuses, setEditSpeciesBonuses] = useState<SpeciesBonusRule[]>([]);
 
   // Registered Users Management State
   const [registeredUsers, setRegisteredUsers] = useState<UserProfile[]>([]);
@@ -561,8 +576,20 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     const feedbackNote = notes[item.id] || 'Captura homologada e validada pela comissão de arbitragem.';
 
     try {
-      await updateCatchStatus(item.id, 'approved', feedbackNote);
-      showFlashMessage(`✅ Captura de ${item.species} (${item.length}cm) homologada com sucesso!`, 'success');
+      const tourney = tournaments.find(t => t.id === item.tournamentId);
+      const pointsData = tourney?.pointsConfig?.enabled
+        ? calculateCatchPoints(item.length, item.species, tourney.pointsConfig)
+        : undefined;
+
+      await updateCatchStatus(
+        item.id, 
+        'approved', 
+        feedbackNote,
+        pointsData ? { points: pointsData.points, pointsBreakdown: pointsData.breakdown } : undefined
+      );
+
+      const pointsMsg = pointsData ? ` • Pontuação: +${pointsData.points} pts` : '';
+      showFlashMessage(`✅ Captura de ${item.species} (${item.length}cm) homologada com sucesso!${pointsMsg}`, 'success');
       
       setNotes((prev) => {
         const next = { ...prev };
@@ -643,6 +670,29 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     setEditFeeAmount(t.entryFeeAmount ? String(t.entryFeeAmount) : '');
     setEditFormat(t.teamFormat || 'solo');
     setEditImage(t.imageUrl || IMAGE_PRESETS[0].url);
+    setEditMetric(t.metric || 'length');
+    
+    // Points config
+    if (t.pointsConfig) {
+      setEditPointsEnabled(t.pointsConfig.enabled);
+      setEditPointsPerFish(t.pointsConfig.pointsPerFish ?? 1);
+      setEditPointsPerCm(t.pointsConfig.pointsPerCm ?? 0);
+      setMinValidLength(t.pointsConfig.minValidLength ?? 25);
+      setEditPointRules(t.pointsConfig.pointRules ? [...t.pointsConfig.pointRules] : []);
+      setEditSpeciesBonuses(t.pointsConfig.speciesBonus ? [...t.pointsConfig.speciesBonus] : []);
+    } else {
+      setEditPointsEnabled(t.metric === 'points');
+      setEditPointsPerFish(1);
+      setEditPointsPerCm(0);
+      setEditMinValidLength(25);
+      setEditPointRules([
+        { id: 'r1', minCm: 25, maxCm: 34.9, points: 10, description: '25cm a 34.9cm' },
+        { id: 'r2', minCm: 35, maxCm: 44.9, points: 20, description: '35cm a 44.9cm' },
+        { id: 'r3', minCm: 45, maxCm: 54.9, points: 40, description: '45cm a 54.9cm' },
+        { id: 'r4', minCm: 55, points: 80, description: '55cm ou mais (Troféu)' }
+      ]);
+      setEditSpeciesBonuses([]);
+    }
   };
 
   // Save Tournament Edit with safety confirmation
@@ -660,6 +710,17 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
         setConfirmDialog(null);
         try {
           setIsSubmitting(true);
+          const effectiveMetric = editPointsEnabled ? 'points' : editMetric;
+          const pointsConfig: TournamentPointsConfig | undefined = editPointsEnabled ? {
+            enabled: true,
+            scoringMode: 'ranges',
+            pointsPerFish: Number(editPointsPerFish) || 1,
+            pointsPerCm: Number(editPointsPerCm) || 0,
+            minValidLength: Number(editMinValidLength) || 25,
+            pointRules: editPointRules,
+            speciesBonus: editSpeciesBonuses.length > 0 ? editSpeciesBonuses : undefined
+          } : undefined;
+
           await updateTournament(editingTournament.id, {
             title: editTitle.trim(),
             description: editDescription.trim(),
@@ -672,7 +733,9 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             entryFeeType: editFeeType,
             entryFeeAmount: editFeeType === 'pago' && editFeeAmount ? Number(editFeeAmount) : 0,
             teamFormat: editFormat,
-            imageUrl: editImage
+            imageUrl: editImage,
+            metric: effectiveMetric,
+            pointsConfig: pointsConfig
           });
 
           showFlashMessage('✅ Campeonato atualizado com sucesso!', 'success');
@@ -686,15 +749,35 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     });
   };
 
-  // Open Champion & Finalize Modal with auto-calculated leaderboard
+  // Open Champion & Finalize Modal with auto-calculated leaderboard (Dynamic Multi-Podium)
   const handleOpenFinalizeTournamentModal = (t: Tournament) => {
     setFinalizingTournament(t);
     setFinalizeError('');
+    setFinalizeClosingNotes(t.closingNotes || '');
 
-    // Filter approved catches for this tournament
+    if (t.winners && t.winners.length > 0) {
+      setPodiumWinners(t.winners.map((w, idx) => ({ ...w, position: w.position || idx + 1 })));
+      return;
+    }
+
+    if (t.championInfo) {
+      const list: TournamentWinner[] = [
+        { ...t.championInfo, position: 1, trophy: t.championInfo.trophy || '1º Lugar Geral - Grande Campeão (Ouro)' }
+      ];
+      if (t.runnerUpInfo) {
+        list.push({ ...t.runnerUpInfo, position: 2, trophy: t.runnerUpInfo.trophy || '2º Lugar - Vice-Campeão (Prata)' });
+      }
+      if (t.thirdPlaceInfo) {
+        list.push({ ...t.thirdPlaceInfo, position: 3, trophy: t.thirdPlaceInfo.trophy || '3º Lugar - Pódio Bronze' });
+      }
+      setPodiumWinners(list);
+      return;
+    }
+
+    // Auto-calculate from tournament catches
     const tourneyCatches = catches.filter(c => c.tournamentId === t.id && c.status === 'approved');
+    const isPointsMode = t.metric === 'points' || (t.pointsConfig && t.pointsConfig.enabled);
 
-    // Group by user / team
     const mapTotals = new Map<string, {
       userId: string;
       userName: string;
@@ -703,10 +786,12 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       teamLogo?: string;
       bestCatch: Catch;
       totalLength: number;
+      totalPoints: number;
     }>();
 
     tourneyCatches.forEach(c => {
       const key = c.teamId || c.userId;
+      const pts = c.points !== undefined ? c.points : calculateCatchPoints(c.length, t.pointsConfig).points;
       const existing = mapTotals.get(key);
       if (!existing) {
         mapTotals.set(key, {
@@ -716,73 +801,70 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           teamName: c.teamName,
           teamLogo: c.teamLogo,
           bestCatch: c,
-          totalLength: c.length
+          totalLength: c.length,
+          totalPoints: pts
         });
       } else {
         existing.totalLength += c.length;
+        existing.totalPoints += pts;
         if (c.length > existing.bestCatch.length) {
           existing.bestCatch = c;
         }
       }
     });
 
-    const ranking = Array.from(mapTotals.values()).sort((a, b) => b.bestCatch.length - a.bestCatch.length);
-    const top1 = ranking[0];
-    const top2 = ranking[1];
-    const top3 = ranking[2];
+    const ranking = Array.from(mapTotals.values()).sort((a, b) => {
+      if (isPointsMode) {
+        return b.totalPoints - a.totalPoints || b.bestCatch.length - a.bestCatch.length;
+      }
+      return b.bestCatch.length - a.bestCatch.length;
+    });
 
-    if (t.championInfo) {
-      setChampName(t.championInfo.userName || '');
-      setChampTeam(t.championInfo.teamName || '');
-      setChampTrophy(t.championInfo.trophy || '1º Lugar Geral - Grande Campeão');
-      setChampFishSize(t.championInfo.catchSize ? String(t.championInfo.catchSize) : '');
-      setChampSpecies(t.championInfo.species || '');
-      setChampPhoto(t.championInfo.photoUrl || '');
-      setChampNotes(t.championInfo.notes || '');
-    } else if (top1) {
-      setChampName(top1.userName);
-      setChampTeam(top1.teamName || '');
-      setChampTrophy('1º Lugar Geral - Grande Campeão');
-      setChampFishSize(String(top1.bestCatch.length));
-      setChampSpecies(top1.bestCatch.species || 'Tucunaré');
-      setChampPhoto(top1.bestCatch.photoUrl || '');
-      setChampNotes(`Campeão com exemplar de ${top1.bestCatch.species} (${top1.bestCatch.length} cm)`);
-    } else {
-      setChampName('');
-      setChampTeam('');
-      setChampTrophy('1º Lugar Geral - Grande Campeão');
-      setChampFishSize('');
-      setChampSpecies('');
-      setChampPhoto('');
-      setChampNotes('');
+    const initialWinners: TournamentWinner[] = [];
+
+    if (ranking.length > 0) {
+      ranking.slice(0, Math.max(3, ranking.length)).forEach((r, idx) => {
+        const pos = idx + 1;
+        let defaultTrophy = `${pos}º Lugar Geral`;
+        if (pos === 1) defaultTrophy = '1º Lugar Geral - Grande Campeão (Ouro)';
+        else if (pos === 2) defaultTrophy = '2º Lugar - Vice-Campeão (Prata)';
+        else if (pos === 3) defaultTrophy = '3º Lugar - Pódio Bronze';
+        else if (pos === 4) defaultTrophy = '4º Lugar Oficial';
+        else if (pos === 5) defaultTrophy = '5º Lugar Oficial';
+
+        initialWinners.push({
+          position: pos,
+          userId: r.userId,
+          userName: r.userName,
+          userEmail: r.userEmail,
+          teamName: r.teamName,
+          teamLogo: r.teamLogo,
+          trophy: defaultTrophy,
+          catchSize: r.bestCatch.length,
+          species: r.bestCatch.species || 'Tucunaré',
+          photoUrl: r.bestCatch.photoUrl || '',
+          prize: pos === 1 ? (t.prize || '') : '',
+          notes: `Classificado no ranking oficial com ${isPointsMode ? `${r.totalPoints} pts / ` : ''}peixe de ${r.bestCatch.length} cm`
+        });
+      });
     }
 
-    if (t.runnerUpInfo) {
-      setRunnerUpName(t.runnerUpInfo.userName || '');
-      setRunnerUpTeam(t.runnerUpInfo.teamName || '');
-    } else if (top2) {
-      setRunnerUpName(top2.userName);
-      setRunnerUpTeam(top2.teamName || '');
-    } else {
-      setRunnerUpName('');
-      setRunnerUpTeam('');
+    if (initialWinners.length === 0) {
+      initialWinners.push(
+        { position: 1, userName: '', teamName: '', trophy: '1º Lugar Geral - Grande Campeão (Ouro)', catchSize: undefined, species: '', photoUrl: '', prize: t.prize || '', notes: '' },
+        { position: 2, userName: '', teamName: '', trophy: '2º Lugar - Vice-Campeão (Prata)', catchSize: undefined, species: '', photoUrl: '', prize: '', notes: '' },
+        { position: 3, userName: '', teamName: '', trophy: '3º Lugar - Pódio Bronze', catchSize: undefined, species: '', photoUrl: '', prize: '', notes: '' }
+      );
     }
 
-    if (t.thirdPlaceInfo) {
-      setThirdPlaceName(t.thirdPlaceInfo.userName || '');
-      setThirdPlaceTeam(t.thirdPlaceInfo.teamName || '');
-    } else if (top3) {
-      setThirdPlaceName(top3.userName);
-      setThirdPlaceTeam(top3.teamName || '');
-    } else {
-      setThirdPlaceName('');
-      setThirdPlaceTeam('');
-    }
+    setPodiumWinners(initialWinners);
   };
 
   const handleApplyAutoRankingToChampions = () => {
     if (!finalizingTournament) return;
     const tourneyCatches = catches.filter(c => c.tournamentId === finalizingTournament.id && c.status === 'approved');
+    const isPointsMode = finalizingTournament.metric === 'points' || (finalizingTournament.pointsConfig && finalizingTournament.pointsConfig.enabled);
+
     const mapTotals = new Map<string, {
       userId: string;
       userName: string;
@@ -790,10 +872,13 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       teamName?: string;
       teamLogo?: string;
       bestCatch: Catch;
+      totalLength: number;
+      totalPoints: number;
     }>();
 
     tourneyCatches.forEach(c => {
       const key = c.teamId || c.userId;
+      const pts = c.points !== undefined ? c.points : calculateCatchPoints(c.length, finalizingTournament.pointsConfig).points;
       const existing = mapTotals.get(key);
       if (!existing || c.length > existing.bestCatch.length) {
         mapTotals.set(key, {
@@ -802,42 +887,96 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           userEmail: c.userEmail,
           teamName: c.teamName,
           teamLogo: c.teamLogo,
-          bestCatch: c
+          bestCatch: c,
+          totalLength: c.length,
+          totalPoints: pts
         });
       }
     });
 
-    const ranking = Array.from(mapTotals.values()).sort((a, b) => b.bestCatch.length - a.bestCatch.length);
+    const ranking = Array.from(mapTotals.values()).sort((a, b) => {
+      if (isPointsMode) {
+        return b.totalPoints - a.totalPoints || b.bestCatch.length - a.bestCatch.length;
+      }
+      return b.bestCatch.length - a.bestCatch.length;
+    });
+
     if (ranking.length === 0) {
       showFlashMessage('Nenhuma captura homologada encontrada para preenchimento automático.', 'error');
       return;
     }
 
-    const top1 = ranking[0];
-    const top2 = ranking[1];
-    const top3 = ranking[2];
+    const autoWinners: TournamentWinner[] = ranking.map((r, idx) => {
+      const pos = idx + 1;
+      let defaultTrophy = `${pos}º Lugar Geral`;
+      if (pos === 1) defaultTrophy = '1º Lugar Geral - Grande Campeão (Ouro)';
+      else if (pos === 2) defaultTrophy = '2º Lugar - Vice-Campeão (Prata)';
+      else if (pos === 3) defaultTrophy = '3º Lugar - Pódio Bronze';
+      else if (pos === 4) defaultTrophy = '4º Lugar - Premiação Oficial';
+      else if (pos === 5) defaultTrophy = '5º Lugar - Premiação Oficial';
 
-    if (top1) {
-      setChampName(top1.userName);
-      setChampTeam(top1.teamName || '');
-      setChampTrophy('1º Lugar Geral - Grande Campeão');
-      setChampFishSize(String(top1.bestCatch.length));
-      setChampSpecies(top1.bestCatch.species || 'Tucunaré');
-      setChampPhoto(top1.bestCatch.photoUrl || '');
-      setChampNotes(`Campeão com captura de ${top1.bestCatch.species} (${top1.bestCatch.length} cm)`);
+      return {
+        position: pos,
+        userId: r.userId,
+        userName: r.userName,
+        userEmail: r.userEmail,
+        teamName: r.teamName,
+        teamLogo: r.teamLogo,
+        trophy: defaultTrophy,
+        catchSize: r.bestCatch.length,
+        species: r.bestCatch.species || 'Tucunaré',
+        photoUrl: r.bestCatch.photoUrl || '',
+        prize: pos === 1 ? (finalizingTournament.prize || '') : '',
+        notes: `Classificado no ranking oficial com ${isPointsMode ? `${r.totalPoints} pts / ` : ''}peixe de ${r.bestCatch.length} cm`
+      };
+    });
+
+    setPodiumWinners(autoWinners);
+    showFlashMessage(`✅ Pódio preenchido automaticamente com ${autoWinners.length} competidores classificados!`, 'success');
+  };
+
+  const handleAddPodiumWinner = () => {
+    const nextPos = podiumWinners.length + 1;
+    let defaultTrophy = `${nextPos}º Lugar Geral`;
+    if (nextPos === 2) defaultTrophy = '2º Lugar - Vice-Campeão (Prata)';
+    else if (nextPos === 3) defaultTrophy = '3º Lugar - Pódio Bronze';
+    else if (nextPos === 4) defaultTrophy = '4º Lugar - Premiação Oficial';
+    else if (nextPos === 5) defaultTrophy = '5º Lugar - Premiação Oficial';
+
+    setPodiumWinners([
+      ...podiumWinners,
+      {
+        position: nextPos,
+        userName: '',
+        teamName: '',
+        trophy: defaultTrophy,
+        catchSize: undefined,
+        species: '',
+        photoUrl: '',
+        prize: '',
+        notes: ''
+      }
+    ]);
+  };
+
+  const handleRemovePodiumWinner = (index: number) => {
+    if (index === 0) {
+      showFlashMessage('O 1º Lugar (Campeão) é obrigatório e não pode ser removido.', 'error');
+      return;
     }
+    const updated = podiumWinners.filter((_, i) => i !== index).map((w, i) => ({
+      ...w,
+      position: i + 1
+    }));
+    setPodiumWinners(updated);
+  };
 
-    if (top2) {
-      setRunnerUpName(top2.userName);
-      setRunnerUpTeam(top2.teamName || '');
-    }
-
-    if (top3) {
-      setThirdPlaceName(top3.userName);
-      setThirdPlaceTeam(top3.teamName || '');
-    }
-
-    showFlashMessage('Pódio preenchido automaticamente com base no ranking de capturas!', 'success');
+  const handleUpdatePodiumField = (index: number, field: keyof TournamentWinner, value: any) => {
+    setPodiumWinners(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
   };
 
   const handleConfirmFinalizeAndCrown = async (e: React.FormEvent) => {
@@ -845,45 +984,40 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     if (!finalizingTournament) return;
     setFinalizeError('');
 
-    if (!champName.trim()) {
-      setFinalizeError('Por favor, informe o nome do Campeão ou selecione do ranking automático.');
+    const firstWinner = podiumWinners[0];
+    if (!firstWinner || !firstWinner.userName || !firstWinner.userName.trim()) {
+      setFinalizeError('Por favor, informe o nome do 1º Lugar (Campeão) ou clique em "Puxar do Ranking".');
       return;
     }
 
+    // Filter out optional empty spots where the admin did not write a name
+    const validWinners = podiumWinners
+      .filter((w, idx) => idx === 0 || (w.userName && w.userName.trim() !== ''))
+      .map((w, idx) => ({
+        ...w,
+        position: idx + 1,
+        userName: w.userName.trim(),
+        teamName: w.teamName?.trim() || undefined,
+        trophy: w.trophy?.trim() || `${idx + 1}º Lugar`,
+        species: w.species?.trim() || undefined,
+        photoUrl: w.photoUrl?.trim() || undefined,
+        prize: w.prize?.trim() || undefined,
+        notes: w.notes?.trim() || undefined
+      }));
+
     try {
       setIsFinalizingTourney(true);
-      const championData: any = {
-        userName: champName.trim(),
-        teamName: champTeam.trim() || undefined,
-        trophy: champTrophy.trim() || '1º Lugar Geral - Grande Campeão',
-        catchSize: champFishSize ? parseFloat(champFishSize) : undefined,
-        species: champSpecies.trim() || undefined,
-        photoUrl: champPhoto.trim() || undefined,
-        notes: champNotes.trim() || undefined
-      };
-
-      const runnerUpData: any = runnerUpName.trim() ? {
-        userName: runnerUpName.trim(),
-        teamName: runnerUpTeam.trim() || undefined,
-        trophy: '2º Lugar - Vice-Campeão'
-      } : undefined;
-
-      const thirdPlaceData: any = thirdPlaceName.trim() ? {
-        userName: thirdPlaceName.trim(),
-        teamName: thirdPlaceTeam.trim() || undefined,
-        trophy: '3º Lugar - Pódio Bronze'
-      } : undefined;
 
       await finalizeTournamentWithChampions(
         finalizingTournament.id,
         finalizingTournament.title,
-        championData,
-        runnerUpData,
-        thirdPlaceData,
-        champNotes
+        validWinners,
+        undefined,
+        undefined,
+        finalizeClosingNotes.trim() || undefined
       );
 
-      showFlashMessage(`🏆 Campeonato "${finalizingTournament.title}" encerrado e Campeão ${champName.trim()} consagrado!`, 'success');
+      showFlashMessage(`🏆 Campeonato "${finalizingTournament.title}" encerrado com ${validWinners.length} posições de pódio consagradas!`, 'success');
       setFinalizingTournament(null);
     } catch (err: any) {
       setFinalizeError('Erro ao finalizar campeonato: ' + (err.message || 'Erro inesperado'));
@@ -989,6 +1123,16 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
         try {
           setIsSubmitting(true);
           const effectiveBannerUrl = imageUrl.trim() || IMAGE_PRESETS[0].url;
+          const effectiveMetric = pointsEnabled ? 'points' : metric;
+          const pointsConfig: TournamentPointsConfig | undefined = pointsEnabled ? {
+            enabled: true,
+            scoringMode: 'ranges',
+            pointsPerFish: Number(pointsPerFish) || 1,
+            pointsPerCm: Number(pointsPerCm) || 0,
+            minValidLength: Number(minValidLength) || 25,
+            pointRules: pointRules,
+            speciesBonus: speciesBonuses.length > 0 ? speciesBonuses : undefined
+          } : undefined;
 
           await createTournament({
             title: title.trim(),
@@ -998,7 +1142,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             endDate: endDate || '2026-12-31',
             status: status,
             targetSpecies: species.length > 0 ? species : ['Tucunaré'],
-            metric: metric,
+            metric: effectiveMetric,
+            pointsConfig: pointsConfig,
             prize: effectivePrize,
             prizeValue: prizeValue ? Number(prizeValue) : undefined,
             entryFeeType: entryFeeType,
@@ -1027,6 +1172,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setMaxParticipants(50);
           setParticipationCode('');
           setCaptureWindows([]);
+          setPointsEnabled(false);
+          setPointRules([
+            { id: 'r1', minCm: 25, maxCm: 34.9, points: 10, description: '25cm a 34.9cm' },
+            { id: 'r2', minCm: 35, maxCm: 44.9, points: 20, description: '35cm a 44.9cm' },
+            { id: 'r3', minCm: 45, maxCm: 54.9, points: 40, description: '45cm a 54.9cm' },
+            { id: 'r4', minCm: 55, points: 80, description: '55cm ou mais (Troféu)' }
+          ]);
+          setSpeciesBonuses([]);
           setActiveSection('tournaments');
         } catch (err: any) {
           setFormError('Erro ao criar campeonato: ' + (err.message || 'Erro inesperado'));
@@ -1853,6 +2006,34 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                         </div>
                       </div>
 
+                      {/* Points scoring breakdown / preview */}
+                      {(() => {
+                        const t = tournaments.find(tourney => tourney.id === item.tournamentId);
+                        if (item.points !== undefined) {
+                          return (
+                            <div className="mt-2.5 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs font-mono">
+                              <span className="text-amber-400 font-bold flex items-center gap-1.5">
+                                <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                                <span>Pontuação Homologada: <strong>+{item.points} pts</strong></span>
+                              </span>
+                              <span className="text-[11px] text-slate-400">{item.pointsBreakdown}</span>
+                            </div>
+                          );
+                        } else if (t?.pointsConfig?.enabled) {
+                          const preview = calculateCatchPoints(item.length, item.species, t.pointsConfig);
+                          return (
+                            <div className="mt-2.5 p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-between text-xs font-mono">
+                              <span className="text-sky-300 font-bold flex items-center gap-1.5">
+                                <Star className="h-4 w-4 text-sky-400" />
+                                <span>Pontuação Prevista: <strong>+{preview.points} pts</strong></span>
+                              </span>
+                              <span className="text-[11px] text-slate-400">{preview.breakdown}</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+
                       {/* Video Release Link if available */}
                       {(item.videoStartUrl || item.videoEndUrl) && (
                         <div className="mt-2.5 flex flex-wrap gap-2">
@@ -2420,7 +2601,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                     </div>
 
                     {/* Metadata Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono bg-slate-950/60 p-3 rounded-2xl border border-slate-850">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono bg-slate-950/60 p-3 rounded-2xl border border-slate-850">
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase block">Inscrição</span>
                         <span className="font-bold text-slate-200">
@@ -2430,6 +2611,20 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase block">Formato</span>
                         <span className="font-bold text-slate-200 capitalize">{t.teamFormat || 'Solo'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase block">Critério / Métrica</span>
+                        <span className="font-bold text-sky-400 flex items-center gap-1">
+                          {t.metric === 'points' || t.pointsConfig?.enabled ? (
+                            <span className="text-amber-400 font-black">⭐ Pontos ({t.pointsConfig?.pointRules?.length || 0} faixas)</span>
+                          ) : t.metric === 'weight' ? (
+                            '⚖️ Por Peso'
+                          ) : t.metric === 'both' ? (
+                            '📏 Compr. & Peso'
+                          ) : (
+                            '📏 Por Comprimento'
+                          )}
+                        </span>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase block">Prêmio Total</span>
@@ -2861,6 +3056,22 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 </div>
               </div>
             </div>
+
+            {/* Row: SISTEMA DE PONTUAÇÃO DOS PEIXES (REGRAS / FAIXAS / BÔNUS) */}
+            <TournamentPointsConfigEditor
+              pointsEnabled={pointsEnabled}
+              setPointsEnabled={setPointsEnabled}
+              pointsPerFish={pointsPerFish}
+              setPointsPerFish={setPointsPerFish}
+              pointsPerCm={pointsPerCm}
+              setPointsPerCm={setPointsPerCm}
+              minValidLength={minValidLength}
+              setMinValidLength={setMinValidLength}
+              pointRules={pointRules}
+              setPointRules={setPointRules}
+              speciesBonuses={speciesBonuses}
+              setSpeciesBonuses={setSpeciesBonuses}
+            />
 
             {/* Row 6: Descrição */}
             <div>
@@ -4622,6 +4833,24 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 </div>
               </div>
 
+              {/* Tournament Points Config Editor in Edit Modal */}
+              <div className="pt-2">
+                <TournamentPointsConfigEditor
+                  pointsEnabled={editPointsEnabled}
+                  setPointsEnabled={setEditPointsEnabled}
+                  pointsPerFish={editPointsPerFish}
+                  setPointsPerFish={setEditPointsPerFish}
+                  pointsPerCm={editPointsPerCm}
+                  setPointsPerCm={setEditPointsPerCm}
+                  minValidLength={editMinValidLength}
+                  setMinValidLength={setEditMinValidLength}
+                  pointRules={editPointRules}
+                  setPointRules={setEditPointRules}
+                  speciesBonuses={editSpeciesBonuses}
+                  setSpeciesBonuses={setEditSpeciesBonuses}
+                />
+              </div>
+
               <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
                 <button
                   type="button"
@@ -5570,7 +5799,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             <div className="flex items-center justify-between bg-slate-950 p-4 rounded-2xl border border-slate-800">
               <div>
                 <span className="text-xs font-bold text-white block">Preenchimento Automático do Ranking</span>
-                <p className="text-[11px] text-slate-400">Puxa o 1º, 2º e 3º colocados com base nas capturas homologadas.</p>
+                <p className="text-[11px] text-slate-400">Puxa 1º, 2º, 3º e todos os colocados com base nas capturas homologadas.</p>
               </div>
               <button
                 type="button"
@@ -5583,152 +5812,204 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             </div>
 
             <form onSubmit={handleConfirmFinalizeAndCrown} className="space-y-5">
-              {/* 🥇 1st Place (Champion) Section */}
-              <div className="p-5 bg-gradient-to-b from-amber-500/10 to-slate-950/80 rounded-2xl border border-amber-500/30 space-y-4">
-                <div className="flex items-center gap-2 text-amber-400 font-mono font-bold text-xs uppercase tracking-wider">
-                  <Crown className="h-4 w-4 fill-amber-400 text-amber-400" />
-                  <span>1º Lugar - Grande Campeão (Ouro) *</span>
-                </div>
+              {/* Dynamic Podium Winners List */}
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+                {podiumWinners.map((winner, idx) => {
+                  const pos = winner.position || idx + 1;
+                  const isFirst = idx === 0;
+                  const isSecond = idx === 1;
+                  const isThird = idx === 2;
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Nome do Campeão *</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ex: Carlos Silva"
-                      value={champName}
-                      onChange={(e) => setChampName(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-bold focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
+                  return (
+                    <div
+                      key={idx}
+                      className={`p-4 sm:p-5 rounded-2xl border space-y-3 transition ${
+                        isFirst
+                          ? 'bg-gradient-to-b from-amber-500/15 to-slate-950/90 border-amber-500/40 shadow-lg'
+                          : isSecond
+                          ? 'bg-slate-950 border-slate-700/80 shadow-md'
+                          : isThird
+                          ? 'bg-slate-950 border-amber-600/30 shadow-md'
+                          : 'bg-slate-950/90 border-slate-800'
+                      }`}
+                    >
+                      {/* Spot Header */}
+                      <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+                        <div className="flex items-center gap-2">
+                          {isFirst ? (
+                            <div className="h-7 w-7 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xs shadow">
+                              🥇 1º
+                            </div>
+                          ) : isSecond ? (
+                            <div className="h-7 w-7 rounded-lg bg-slate-300 text-slate-950 flex items-center justify-center font-black text-xs shadow">
+                              🥈 2º
+                            </div>
+                          ) : isThird ? (
+                            <div className="h-7 w-7 rounded-lg bg-amber-700 text-amber-100 flex items-center justify-center font-black text-xs shadow">
+                              🥉 3º
+                            </div>
+                          ) : (
+                            <div className="h-7 w-7 rounded-lg bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-xs border border-slate-700">
+                              #{pos}
+                            </div>
+                          )}
+                          <span className={`text-xs font-mono font-bold uppercase tracking-wider ${
+                            isFirst ? 'text-amber-300' : isSecond ? 'text-slate-200' : isThird ? 'text-amber-500' : 'text-slate-300'
+                          }`}>
+                            {isFirst ? '1º Lugar - Grande Campeão (Ouro) *' : `${pos}º Lugar - Pódio Oficial (Opcional)`}
+                          </span>
+                        </div>
 
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Equipe (Opcional)</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Equipe Tucuna Brutos"
-                      value={champTeam}
-                      onChange={(e) => setChampTeam(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs sm:text-sm focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
-                </div>
+                        {!isFirst && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePodiumWinner(idx)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition cursor-pointer text-[11px] flex items-center gap-1"
+                            title="Remover esta posição do pódio"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Remover</span>
+                          </button>
+                        )}
+                      </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Título / Troféu</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: 1º Lugar Geral"
-                      value={champTrophy}
-                      onChange={(e) => setChampTrophy(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-amber-300 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
+                      {/* Main Fields: Winner Name & Team */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                            Nome do Pescador / Ganhador {isFirst && '*'}
+                          </label>
+                          <input
+                            type="text"
+                            required={isFirst}
+                            placeholder={isFirst ? 'Ex: Carlos Silva' : `Nome do ${pos}º Colocado`}
+                            value={winner.userName || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'userName', e.target.value)}
+                            className={`w-full bg-[#181a1f] border rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold text-white focus:outline-none ${
+                              isFirst ? 'border-amber-500/40 focus:border-amber-400' : 'border-slate-800 focus:border-slate-500'
+                            }`}
+                          />
+                        </div>
 
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Tamanho do Peixe (cm)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      placeholder="Ex: 68.5"
-                      value={champFishSize}
-                      onChange={(e) => setChampFishSize(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-emerald-400 font-mono font-bold rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
+                        <div>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                            Equipe / Parceiros (Opcional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Equipe Tucuna Brutos"
+                            value={winner.teamName || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'teamName', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3.5 py-2 text-xs sm:text-sm focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Espécie</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Tucunaré Azul"
-                      value={champSpecies}
-                      onChange={(e) => setChampSpecies(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
-                </div>
+                      {/* Details: Trophy title, Size/Points, Species, Prize */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">Título / Troféu</label>
+                          <input
+                            type="text"
+                            placeholder={`Ex: ${pos}º Lugar`}
+                            value={winner.trophy || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'trophy', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-slate-200 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Foto da Captura / Campeão (URL)</label>
-                    <input
-                      type="text"
-                      placeholder="URL da foto do troféu ou captura"
-                      value={champPhoto}
-                      onChange={(e) => setChampPhoto(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">Tamanho (cm) / Pts</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            placeholder="Ex: 68.5"
+                            value={winner.catchSize !== undefined && winner.catchSize !== null ? String(winner.catchSize) : ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'catchSize', e.target.value ? parseFloat(e.target.value) : undefined)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-emerald-400 font-mono font-bold rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
 
-                  <div>
-                    <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">Mensagem de Consagração</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Grande campeão com captura recorde na represa."
-                      value={champNotes}
-                      onChange={(e) => setChampNotes(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
-                </div>
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">Espécie</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Tucunaré Azul"
+                            value={winner.species || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'species', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">Premiação Específica</label>
+                          <input
+                            type="text"
+                            placeholder={isFirst ? (finalizingTournament.prize || 'Ex: R$ 2.000 + Troféu') : 'Ex: Troféu + Vara'}
+                            value={winner.prize || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'prize', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-amber-300 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Photo & Notes */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">URL da Foto (Opcional)</label>
+                          <input
+                            type="text"
+                            placeholder="URL da foto do troféu ou captura"
+                            value={winner.photoUrl || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'photoUrl', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-slate-300 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[9px] font-mono text-slate-400 uppercase block mb-0.5">Mensagem de Destaque (Opcional)</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Exemplar capturado no último dia."
+                            value={winner.notes || ''}
+                            onChange={(e) => handleUpdatePodiumField(idx, 'notes', e.target.value)}
+                            className="w-full bg-[#181a1f] border border-slate-800 text-slate-300 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none focus:border-slate-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* 🥈 2nd Place (Vice-Champion) & 🥉 3rd Place */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
-                  <span className="text-[10px] font-mono font-bold uppercase text-slate-300 block">
-                    🥈 2º Lugar - Vice-Campeão (Opcional)
-                  </span>
-                  <div>
-                    <label className="text-[9px] font-mono text-slate-400 block mb-0.5">Nome do Vice-Campeão</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Rodrigo Pereira"
-                      value={runnerUpName}
-                      onChange={(e) => setRunnerUpName(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-slate-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-mono text-slate-400 block mb-0.5">Equipe</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Equipe Predadores"
-                      value={runnerUpTeam}
-                      onChange={(e) => setRunnerUpTeam(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-slate-500"
-                    />
-                  </div>
-                </div>
+              {/* Add Podium Spot Button */}
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={handleAddPodiumWinner}
+                  className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/30 hover:border-emerald-500/60 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  <span>+ Adicionar Posição ao Pódio ({podiumWinners.length + 1}º Lugar)</span>
+                </button>
 
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
-                  <span className="text-[10px] font-mono font-bold uppercase text-amber-500 block">
-                    🥉 3º Lugar - Pódio Bronze (Opcional)
-                  </span>
-                  <div>
-                    <label className="text-[9px] font-mono text-slate-400 block mb-0.5">Nome do 3º Colocado</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Marcos Souza"
-                      value={thirdPlaceName}
-                      onChange={(e) => setThirdPlaceName(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-slate-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-mono text-slate-400 block mb-0.5">Equipe</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Equipe Linha Bruta"
-                      value={thirdPlaceTeam}
-                      onChange={(e) => setThirdPlaceTeam(e.target.value)}
-                      className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-slate-500"
-                    />
-                  </div>
-                </div>
+                <span className="text-[11px] font-mono text-slate-400">
+                  Total no pódio: <strong className="text-white">{podiumWinners.length}</strong>
+                </span>
+              </div>
+
+              {/* Closing Notes */}
+              <div>
+                <label className="text-[10px] font-mono text-slate-400 uppercase block mb-1">
+                  Comunicado / Mensagem Geral de Encerramento (Opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Ex: Agradecemos a todos os competidores que participaram com espírito esportivo e respeito ao meio ambiente!"
+                  value={finalizeClosingNotes}
+                  onChange={(e) => setFinalizeClosingNotes(e.target.value)}
+                  className="w-full bg-[#181a1f] border border-slate-800 text-slate-300 rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-amber-400"
+                />
               </div>
 
               {/* Action Buttons */}
@@ -5746,7 +6027,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition cursor-pointer shadow-lg flex items-center gap-2 disabled:opacity-50"
                 >
                   <Trophy className="h-4 w-4 text-slate-950" />
-                  <span>{isFinalizingTourney ? 'Consagrando Campeão...' : 'Consagrar Campeão & Finalizar'}</span>
+                  <span>{isFinalizingTourney ? 'Consagrando Pódio...' : 'Consagrar Pódio & Encerrar Torneio'}</span>
                 </button>
               </div>
             </form>
