@@ -22,36 +22,23 @@ import {
   ChevronDown,
   ChevronUp,
   MessageCircle,
-  ExternalLink,
-  Maximize2
+  ExternalLink
 } from 'lucide-react';
 import OfficialRulerGraphic from './OfficialRulerGraphic';
-import OfficialRulerModal from './OfficialRulerModal';
 
 interface HowToParticipateViewProps {
   onNavigateToTournaments?: () => void;
   onOpenAuthModal?: () => void;
-  onOpenRulerModal?: () => void;
   isLoggedIn?: boolean;
 }
 
 export default function HowToParticipateView({
   onNavigateToTournaments,
   onOpenAuthModal,
-  onOpenRulerModal,
   isLoggedIn = false
 }: HowToParticipateViewProps) {
   // FAQ accordion state
   const [openFaq, setOpenFaq] = useState<number | null>(0);
-  const [isLocalRulerModalOpen, setIsLocalRulerModalOpen] = useState(false);
-
-  const handleOpenRuler = () => {
-    if (onOpenRulerModal) {
-      onOpenRulerModal();
-    } else {
-      setIsLocalRulerModalOpen(true);
-    }
-  };
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
@@ -200,7 +187,7 @@ export default function HowToParticipateView({
 
                 {/* Compact Visual Ruler Preview inside Pilar 1 */}
                 <div className="pt-1">
-                  <OfficialRulerGraphic compact onOpenZoom={handleOpenRuler} />
+                  <OfficialRulerGraphic />
                 </div>
 
                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-2">
@@ -225,26 +212,15 @@ export default function HowToParticipateView({
                 <span className="text-[10px] text-slate-400 font-mono">/ unidade</span>
               </div>
               
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={handleOpenRuler}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Maximize2 className="h-3.5 w-3.5 text-[#00c853]" />
-                  <span>Ver Detalhes</span>
-                </button>
-
-                <a
-                  href={whatsappReguaUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="w-full sm:w-auto px-5 py-2.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-emerald-950/30"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  <span>Comprar (R$ 70)</span>
-                </a>
-              </div>
+              <a
+                href={whatsappReguaUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full sm:w-auto px-6 py-2.5 bg-[#00c853] hover:bg-[#00e676] text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-emerald-950/30 cursor-pointer"
+              >
+                <MessageCircle className="h-4 w-4" />
+                <span>Comprar Régua Oficial (R$ 70)</span>
+              </a>
             </div>
           </div>
 
@@ -626,13 +602,6 @@ export default function HowToParticipateView({
           )}
         </div>
       </div>
-
-      {/* RULER DETAIL MODAL */}
-      <OfficialRulerModal
-        isOpen={isLocalRulerModalOpen}
-        onClose={() => setIsLocalRulerModalOpen(false)}
-      />
-
     </div>
   );
 }

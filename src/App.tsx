@@ -32,7 +32,6 @@ import AboutUsView from './components/AboutUsView';
 import HowToParticipateView from './components/HowToParticipateView';
 import AuthModal from './components/AuthModal';
 import ParticipateModal from './components/ParticipateModal';
-import OfficialRulerModal from './components/OfficialRulerModal';
 import { Tournament, Catch, UserProfile } from './types';
 import { seedTournamentsIfNeeded, subscribeTournaments, subscribeCatches } from './utils/dbHelpers';
 
@@ -51,7 +50,6 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isSubmitCatchOpen, setIsSubmitCatchOpen] = useState<boolean>(false);
   const [isParticipateModalOpen, setIsParticipateModalOpen] = useState<boolean>(false);
-  const [isRulerModalOpen, setIsRulerModalOpen] = useState<boolean>(false);
   const [participateTournament, setParticipateTournament] = useState<Tournament | null>(null);
   const [participateInitialCode, setParticipateInitialCode] = useState<string>('');
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -142,7 +140,6 @@ export default function App() {
         setCurrentTab={setCurrentTab} 
         user={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onOpenRulerModal={() => setIsRulerModalOpen(true)}
         onLogout={handleLogout}
       />
 
@@ -390,7 +387,6 @@ export default function App() {
               <HowToParticipateView 
                 onNavigateToTournaments={() => setCurrentTab('tournaments')}
                 onOpenAuthModal={() => setIsAuthModalOpen(true)}
-                onOpenRulerModal={() => setIsRulerModalOpen(true)}
                 isLoggedIn={currentUser !== null}
               />
             )}
@@ -540,12 +536,6 @@ export default function App() {
           setSelectedTournament(t);
           setCurrentTab('profile');
         }}
-      />
-
-      {/* Official Ruler Showcase & Purchase Dialog */}
-      <OfficialRulerModal
-        isOpen={isRulerModalOpen}
-        onClose={() => setIsRulerModalOpen(false)}
       />
     </div>
   );
