@@ -1,8 +1,202 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    // =========================================================================
+    // SECURITY GUARDS & ANTI-HACKER ABAC HELPERS
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
     }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "pr.diegoroberto@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserData().role == "admin")
+      );
+    }
+
+    function isModerator() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         (getUserData().role == "moderator" || getUserData().role == "admin"))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Default deny all unknown collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 1. USERS COLLECTION (Anti-Theft & Anti-Escalation Protection)
+    // =========================================================================
+    match /users/{userId} {
+      // Users can read their own profile; Admins/Moderators can audit users
+      allow read: if isSignedIn() && (isUser(userId) || isModerator());
+
+      // Create: Users can register their own profile with role 'angler' only (prevents self-assigned admin)
+      allow create: if isSignedIn() && (
+        (isUser(userId) && request.resource.data.role == "angler") ||
+        isAdmin()
+      );
+
+      // Update: Users can update their personal details, but CANNOT escalate their own 'role'
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (isUser(userId) && request.resource.data.role == resource.data.role)
+      );
+
+      // Delete: Only admins can delete user records
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 2. TOURNAMENTS COLLECTION (Public Read, Admin/Moderator Only Writes)
+    // =========================================================================
+    match /tournaments/{tournamentId} {
+      // Anyone can view tournament details and rules
+      allow read: if true;
+
+      // Only certified Admins or Moderators can create, modify or delete tournaments
+      allow create, update, delete: if isModerator();
+    }
+
+    // =========================================================================
+    // 3. CATCHES COLLECTION (Protected Submissions & Arbitrated Approvals)
+    // =========================================================================
+    match /catches/{catchId} {
+      // All anglers and public can view catches for transparency on rankings
+      allow read: if true;
+
+      // Create: Anglers can submit catches with 'pending' status under their UID
+      allow create: if isSignedIn() && (
+        isModerator() ||
+        (request.resource.data.userId == request.auth.uid && request.resource.data.status == "pending")
+      );
+
+      // Update: Only Moderators/Admins can approve/reject, or owner updating unapproved catch notes
+      allow update: if isSignedIn() && (
+        isModerator() ||
+        // Angler can like or comment on a catch
+        request.resource.data.diff(resource.data).affectedKeys().hasAny(['likes', 'comments']) ||
+        // Angler updating their own catch while still pending
+        (resource.data.userId == request.auth.uid && resource.data.status == "pending")
+      );
+
+      // Delete: Moderators or author before approval
+      allow delete: if isSignedIn() && (
+        isModerator() ||
+        (resource.data.userId == request.auth.uid && resource.data.status == "pending")
+      );
+    }
+
+    // =========================================================================
+    // 4. TOURNAMENT CODES (Anti-Brute Force Registration Protection)
+    // =========================================================================
+    match /tournament_codes/{codeId} {
+      // Users can query/read to validate their participation code; Admins can audit all
+      allow read: if isSignedIn();
+
+      // Only Admins / Moderators can create or revoke codes
+      allow create, delete: if isModerator();
+
+      // Update: Moderators, or Angler linking/claiming their own unassigned code
+      allow update: if isSignedIn() && (
+        isModerator() ||
+        (resource.data.userId == null && request.resource.data.userId == request.auth.uid) ||
+        (resource.data.userId == request.auth.uid)
+      );
+    }
+
+    // =========================================================================
+    // 5. TEAMS COLLECTION (Team Rosters & Groupings)
+    // =========================================================================
+    match /teams/{teamId} {
+      // Public / Anglers can view team rankings
+      allow read: if true;
+
+      // Captains can create teams
+      allow create: if isSignedIn() && (
+        isModerator() || request.resource.data.captainId == request.auth.uid
+      );
+
+      // Captains or Moderators can update team rosters; Members can join with valid code
+      allow update: if isSignedIn() && (
+        isModerator() ||
+        resource.data.captainId == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'score', 'catchesCount'])
+      );
+
+      // Only Captain or Admin can disband team
+      allow delete: if isSignedIn() && (
+        isModerator() || resource.data.captainId == request.auth.uid
+      );
+    }
+
+    // =========================================================================
+    // 6. NOTIFICATIONS COLLECTION (Private Inbox)
+    // =========================================================================
+    match /notifications/{notifId} {
+      // Users can only read their own notifications or global announcements (userId == null)
+      allow read: if isSignedIn() && (
+        isModerator() ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.userId == null ||
+        resource.data.userId == ""
+      );
+
+      // Moderators can create broadcasts; system notifications
+      allow create: if isSignedIn();
+
+      // Users can mark their notifications as read
+      allow update: if isSignedIn() && (
+        isModerator() ||
+        resource.data.userId == request.auth.uid
+      );
+
+      allow delete: if isSignedIn() && (
+        isModerator() ||
+        resource.data.userId == request.auth.uid
+      );
+    }
+
+    // =========================================================================
+    // 7. SUPPORT MESSAGES / HELP DESK (Private Tickets)
+    // =========================================================================
+    match /support_messages/{msgId} {
+      // Users read only their tickets; Moderators read all to provide support
+      allow read: if isSignedIn() && (
+        isModerator() || resource.data.userId == request.auth.uid
+      );
+
+      // Authenticated users can open support tickets
+      allow create: if isSignedIn() && (
+        isModerator() || request.resource.data.userId == request.auth.uid
+      );
+
+      // Moderators can update status/reply; Angler can append messages
+      allow update: if isSignedIn() && (
+        isModerator() || resource.data.userId == request.auth.uid
+      );
+
+      allow delete: if isModerator();
+    }
+
   }
 }

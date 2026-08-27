@@ -44,8 +44,11 @@ import {
   Eye,
   X,
   SlidersHorizontal,
-  Crown
+  Crown,
+  FileText,
+  BookOpen
 } from 'lucide-react';
+import OfficialCaptureRulesModal from './OfficialCaptureRulesModal';
 import { UserProfile, Catch, Tournament, TournamentCode, Team, CaptureWindow, AppNotification, SupportMessage } from '../types';
 import { 
   submitCatch, 
@@ -95,6 +98,9 @@ export default function ProfileView({
 }: ProfileViewProps) {
   // Navigation tabs in profile
   const [activeTab, setActiveTab] = useState<'registration' | 'codes' | 'team' | 'windows' | 'submit' | 'catches' | 'support'>('registration');
+
+  // Official Capture Rules Modal State
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState<boolean>(false);
 
   // Support messages state
   const [userSupportTickets, setUserSupportTickets] = useState<SupportMessage[]>([]);
@@ -1022,6 +1028,16 @@ export default function ProfileView({
                 {userSupportTickets.filter(t => t.status === 'answered').length}
               </span>
             )}
+          </button>
+
+          {/* Regras Button (Válidas para todos os campeonatos) */}
+          <button
+            onClick={() => setIsRulesModalOpen(true)}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 shadow-sm"
+            title="Clique para ler as Regras Oficiais de Comprovação de Captura"
+          >
+            <BookOpen className="h-4 w-4 text-emerald-400" />
+            <span>Regras</span>
           </button>
         </div>
       </div>
@@ -2470,6 +2486,31 @@ export default function ProfileView({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {notif.category === 'urgent' && (
+                              <span className="text-[9px] font-mono uppercase bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 font-bold animate-pulse">
+                                🚨 Urgente
+                              </span>
+                            )}
+                            {notif.category === 'official' && (
+                              <span className="text-[9px] font-mono uppercase bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 font-bold">
+                                📣 Comunicado
+                              </span>
+                            )}
+                            {notif.category === 'direct' && (
+                              <span className="text-[9px] font-mono uppercase bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded border border-sky-500/30 font-bold">
+                                👤 Mensagem Direta
+                              </span>
+                            )}
+                            {notif.category === 'rule' && (
+                              <span className="text-[9px] font-mono uppercase bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
+                                📜 Regulamento
+                              </span>
+                            )}
+                            {notif.category === 'reward' && (
+                              <span className="text-[9px] font-mono uppercase bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded border border-purple-500/30 font-bold">
+                                🏆 Premiação
+                              </span>
+                            )}
                             {notif.type === 'capture_window_added' && (
                               <span className="text-[9px] font-mono uppercase bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
                                 Nova Etapa
@@ -2482,6 +2523,16 @@ export default function ProfileView({
                             )}
                           </div>
                         </div>
+
+                        {notif.senderName && (
+                          <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5">
+                            <Shield className="h-3 w-3 text-amber-400" />
+                            <span>Enviado por: <strong className="text-slate-200">{notif.senderName}</strong></span>
+                            {notif.tournamentTitle && (
+                              <span>• Torneio: <strong className="text-emerald-300">{notif.tournamentTitle}</strong></span>
+                            )}
+                          </div>
+                        )}
 
                         <p className="text-xs leading-relaxed text-slate-300">
                           {notif.message}
@@ -3175,6 +3226,13 @@ export default function ProfileView({
           </div>
         </div>
       )}
+
+      {/* Unified Official Capture Rules Modal */}
+      <OfficialCaptureRulesModal
+        isOpen={isRulesModalOpen}
+        onClose={() => setIsRulesModalOpen(false)}
+        tournamentTitle={selectedTournament?.title || 'Torneio FISGADA PRO'}
+      />
     </div>
   );
 }

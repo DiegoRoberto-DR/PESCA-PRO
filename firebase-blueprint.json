@@ -1,0 +1,144 @@
+{
+  "entities": {
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Official fishing tournament record",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 3, "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 5000 },
+        "rules": { "type": "array" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["upcoming", "active", "completed", "cancelled"] },
+        "targetSpecies": { "type": "array" },
+        "metric": { "type": "string", "enum": ["length", "weight", "both", "points"] },
+        "prize": { "type": "string", "maxLength": 500 },
+        "prizeValue": { "type": "number" },
+        "entryFeeType": { "type": "string", "enum": ["gratuito", "pago"] },
+        "entryFeeAmount": { "type": "number" },
+        "teamFormat": { "type": "string", "enum": ["individual", "dupla", "trio", "quarteto", "equipe5"] },
+        "imageUrl": { "type": "string" },
+        "participantCount": { "type": "number" }
+      },
+      "required": ["title", "startDate", "endDate", "status", "targetSpecies", "metric"]
+    },
+    "Catch": {
+      "title": "Catch",
+      "description": "Angler catch submission for verification and leaderboard",
+      "type": "object",
+      "properties": {
+        "tournamentId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "userAvatar": { "type": "string" },
+        "species": { "type": "string", "maxLength": 100 },
+        "length": { "type": "number" },
+        "weight": { "type": "number" },
+        "points": { "type": "number" },
+        "location": { "type": "string", "maxLength": 200 },
+        "photoUrl": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "likes": { "type": "array" }
+      },
+      "required": ["tournamentId", "userId", "species", "length", "photoUrl", "status"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with roles and secure tournament history",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["angler", "moderator", "admin"] },
+        "cpf": { "type": "string", "maxLength": 20 },
+        "phone": { "type": "string", "maxLength": 25 },
+        "avatar": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "TournamentCode": {
+      "title": "TournamentCode",
+      "description": "Encrypted unique participation authorization code",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "maxLength": 64 },
+        "tournamentId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["active", "used", "revoked"] }
+      },
+      "required": ["code", "tournamentId", "status"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Team registration and roster",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "tournamentId": { "type": "string", "maxLength": 128 },
+        "captainId": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 64 },
+        "members": { "type": "array" }
+      },
+      "required": ["name", "tournamentId", "captainId", "code"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "User or broadcast notification",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "read": { "type": "boolean" }
+      },
+      "required": ["title", "message"]
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "Help desk and security ticket",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "subject": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 3000 },
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved"] }
+      },
+      "required": ["userId", "subject", "message", "status"]
+    }
+  },
+  "firestore": {
+    "/tournaments/{tournamentId}": {
+      "schema": { "$ref": "#/entities/Tournament" },
+      "description": "Tournament management and public leaderboard criteria"
+    },
+    "/catches/{catchId}": {
+      "schema": { "$ref": "#/entities/Catch" },
+      "description": "Angler catch submission"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Angler user profiles and RBAC control"
+    },
+    "/tournament_codes/{codeId}": {
+      "schema": { "$ref": "#/entities/TournamentCode" },
+      "description": "Tournament registration security codes"
+    },
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "Teams and member groupings"
+    },
+    "/notifications/{notifId}": {
+      "schema": { "$ref": "#/entities/AppNotification" },
+      "description": "System and user notifications"
+    },
+    "/support_messages/{msgId}": {
+      "schema": { "$ref": "#/entities/SupportMessage" },
+      "description": "Support tickets and disputes"
+    }
+  }
+}

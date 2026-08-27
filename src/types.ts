@@ -14,11 +14,17 @@ export interface CaptureWindow {
 export interface AppNotification {
   id: string;
   userId?: string; // Se direcionado a um usuário específico, ou undefined para todos os inscritos
+  targetType?: 'all' | 'tournament' | 'user';
+  targetUserName?: string;
+  targetUserEmail?: string;
+  senderName?: string;
+  senderRole?: string;
+  category?: 'official' | 'urgent' | 'rule' | 'reward' | 'direct' | 'general' | 'capture_window';
   tournamentId?: string;
   tournamentTitle?: string;
   title: string;
   message: string;
-  type: 'capture_window' | 'tournament_update' | 'team_update' | 'general';
+  type: 'capture_window' | 'tournament_update' | 'team_update' | 'general' | 'capture_window_added';
   windowDate?: string;
   windowStartTime?: string;
   windowEndTime?: string;

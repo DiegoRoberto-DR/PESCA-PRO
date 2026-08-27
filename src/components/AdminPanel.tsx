@@ -58,7 +58,7 @@ import {
   Phone,
   Star
 } from 'lucide-react';
-import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner, SupportMessage, PointRule, SpeciesBonusRule, TournamentPointsConfig } from '../types';
+import { Catch, Tournament, UserProfile, TournamentCode, Team, CaptureWindow, TournamentWinner, SupportMessage, PointRule, SpeciesBonusRule, TournamentPointsConfig, AppNotification } from '../types';
 import { 
   updateCatchStatus, 
   createTournament, 
@@ -87,7 +87,10 @@ import {
   subscribeSupportMessages,
   respondToSupportMessage,
   deleteSupportMessage,
-  calculateCatchPoints
+  calculateCatchPoints,
+  subscribeNotifications,
+  sendAdminCustomNotification,
+  deleteNotification
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
@@ -144,7 +147,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const canManageModerators = isSuperAdmin;
 
   // Determine initial active section based on user permissions
-  const getInitialSection = (): 'moderation' | 'tournaments' | 'create_tournament' | 'capture_windows' | 'teams' | 'fishermen' | 'antifraud' | 'moderators' => {
+  const getInitialSection = (): 'moderation' | 'tournaments' | 'create_tournament' | 'capture_windows' | 'teams' | 'fishermen' | 'antifraud' | 'notifications' | 'support' | 'moderators' => {
     if (canModerate) return 'moderation';
     if (canTournaments) return 'tournaments';
     if (canFishermen) return 'fishermen';
@@ -153,7 +156,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     return 'moderation';
   };
 
-  const [activeSection, setActiveSection] = useState<'moderation' | 'tournaments' | 'create_tournament' | 'capture_windows' | 'teams' | 'fishermen' | 'antifraud' | 'moderators'>(getInitialSection());
+  const [activeSection, setActiveSection] = useState<'moderation' | 'tournaments' | 'create_tournament' | 'capture_windows' | 'teams' | 'fishermen' | 'antifraud' | 'notifications' | 'support' | 'moderators'>(getInitialSection());
   
   // Flash / Notification state
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -353,6 +356,28 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [replyMessageText, setReplyMessageText] = useState('');
   const [isSendingReply, setIsSendingReply] = useState(false);
 
+  // Admin Direct & Broadcast Notifications State
+  const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
+  const [msgTargetType, setMsgTargetType] = useState<'all' | 'tournament' | 'user'>('all');
+  const [msgSelectedTourneyId, setMsgSelectedTourneyId] = useState<string>(tournaments[0]?.id || '');
+  const [msgSelectedUserId, setMsgSelectedUserId] = useState<string>('');
+  const [msgUserSearch, setMsgUserSearch] = useState<string>('');
+  const [msgCategory, setMsgCategory] = useState<'official' | 'urgent' | 'rule' | 'reward' | 'direct' | 'general'>('official');
+  const [msgTitle, setMsgTitle] = useState<string>('');
+  const [msgContent, setMsgContent] = useState<string>('');
+  const [isSendingNotif, setIsSendingNotif] = useState<boolean>(false);
+  const [notifFormSuccess, setNotifFormSuccess] = useState<string>('');
+  const [notifFormError, setNotifFormError] = useState<string>('');
+  const [searchSentNotifs, setSearchSentNotifs] = useState<string>('');
+  const [deletingNotifId, setDeletingNotifId] = useState<string | null>(null);
+
+  // Sync default tournament for messaging
+  useEffect(() => {
+    if (tournaments.length > 0 && !msgSelectedTourneyId) {
+      setMsgSelectedTourneyId(tournaments[0].id);
+    }
+  }, [tournaments, msgSelectedTourneyId]);
+
   // Sync selectedTourneyForPhase with tournaments list
   useEffect(() => {
     if (tournaments.length > 0 && !selectedTourneyForPhase) {
@@ -392,6 +417,106 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     });
     return () => unsubscribe();
   }, []);
+
+  // Subscribe to real-time notifications for admin management
+  useEffect(() => {
+    const unsubscribe = subscribeNotifications((notifs) => {
+      setAdminNotifications(notifs);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Handler: Send Admin Custom Notification (Broadcast to all, tournament or specific fisherman)
+  const handleSendAdminNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!msgTitle.trim()) {
+      setNotifFormError('Informe o título do aviso/notificação.');
+      return;
+    }
+    if (!msgContent.trim()) {
+      setNotifFormError('Digite a mensagem que será enviada.');
+      return;
+    }
+
+    let targetUserName: string | undefined;
+    let targetUserEmail: string | undefined;
+    let tournamentTitle: string | undefined;
+
+    if (msgTargetType === 'user') {
+      if (!msgSelectedUserId) {
+        setNotifFormError('Por favor, selecione o pescador destinatário da mensagem.');
+        return;
+      }
+      const targetUser = registeredUsers.find(u => u.uid === msgSelectedUserId);
+      if (targetUser) {
+        targetUserName = targetUser.fullName || targetUser.displayName || 'Pescador';
+        targetUserEmail = targetUser.email || undefined;
+      }
+    } else if (msgTargetType === 'tournament') {
+      if (!msgSelectedTourneyId) {
+        setNotifFormError('Por favor, selecione um campeonato.');
+        return;
+      }
+      const targetT = tournaments.find(t => t.id === msgSelectedTourneyId);
+      if (targetT) {
+        tournamentTitle = targetT.title;
+      }
+    }
+
+    setIsSendingNotif(true);
+    setNotifFormError('');
+    setNotifFormSuccess('');
+
+    try {
+      await sendAdminCustomNotification({
+        title: msgTitle.trim(),
+        message: msgContent.trim(),
+        targetType: msgTargetType,
+        userId: msgTargetType === 'user' ? msgSelectedUserId : undefined,
+        targetUserName,
+        targetUserEmail,
+        tournamentId: msgTargetType === 'tournament' ? msgSelectedTourneyId : undefined,
+        tournamentTitle,
+        category: msgCategory,
+        senderName: currentUser?.fullName || currentUser?.displayName || 'Administração & Arbitragem',
+        senderRole: isSuperAdmin ? 'Administrador Geral' : 'Moderador Oficial'
+      });
+
+      const successFeedback = msgTargetType === 'all'
+        ? '📢 Notificação enviada para TODOS os participantes!'
+        : (msgTargetType === 'user'
+            ? `👤 Mensagem enviada para ${targetUserName || 'o participante'}!`
+            : `🏆 Notificação enviada para os inscritos em "${tournamentTitle}"!`);
+
+      setNotifFormSuccess(successFeedback);
+      setMsgTitle('');
+      setMsgContent('');
+      setMsgSelectedUserId('');
+      setMsgUserSearch('');
+
+      showFlashMessage(successFeedback, 'success');
+      setTimeout(() => setNotifFormSuccess(''), 6000);
+    } catch (err: any) {
+      console.error('Erro ao disparar notificação:', err);
+      setNotifFormError(err.message || 'Falha ao disparar notificação.');
+    } finally {
+      setIsSendingNotif(false);
+    }
+  };
+
+  // Handler: Delete sent notification
+  const handleDeleteAdminNotification = async (notifId: string) => {
+    try {
+      setDeletingNotifId(notifId);
+      await deleteNotification(notifId);
+      showFlashMessage('🗑️ Notificação excluída do sistema com sucesso!', 'success');
+    } catch (err: any) {
+      console.error('Erro ao excluir notificação:', err);
+      showFlashMessage('Erro ao excluir notificação.', 'error');
+    } finally {
+      setDeletingNotifId(null);
+    }
+  };
 
   const showFlashMessage = (text: string, type: 'success' | 'error' = 'success') => {
     setActionMessage({ text, type });
@@ -1796,6 +1921,19 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             </button>
           )}
 
+          {/* Notificações & Avisos Tab (Envio Global e Individual) */}
+          <button
+            onClick={() => setActiveSection('notifications')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+              activeSection === 'notifications'
+                ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
+                : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <Send className="h-4 w-4 text-amber-400" />
+            <span>📢 Notificações ({adminNotifications.length})</span>
+          </button>
+
           {/* Suporte Tab (Mensagens dos Usuários) */}
           <button
             onClick={() => setActiveSection('support')}
@@ -2857,40 +2995,18 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
             </div>
 
-            {/* Row 2: Prize Description & Antifraud Keyword */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  DESCRIÇÃO DA PREMIAÇÃO
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: 1º Troféu + R$ 3.000 | 2º Troféu + R$ 1.500 | 3º R$ 500"
-                  value={prize}
-                  onChange={(e) => setPrize(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block flex items-center justify-between">
-                  <span>PALAVRA-CHAVE ANTIFRAUDE GERAL</span>
-                  <button
-                    type="button"
-                    onClick={() => setKeyword(generateUniqueTournamentCode('CHAVE'))}
-                    className="text-[#00e676] hover:underline cursor-pointer lowercase text-[10px]"
-                  >
-                    gerar chave
-                  </button>
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: TORNEIO2026"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value.toUpperCase())}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-amber-400 font-mono font-bold rounded-2xl px-4 py-3.5 text-xs sm:text-sm uppercase focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
-                />
-              </div>
+            {/* Row 2: Prize Description */}
+            <div>
+              <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                DESCRIÇÃO DA PREMIAÇÃO
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: 1º Troféu + R$ 3.000 | 2º Troféu + R$ 1.500 | 3º R$ 500"
+                value={prize}
+                onChange={(e) => setPrize(e.target.value)}
+                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+              />
             </div>
 
             {/* Row: DATES (START / END) & STATUS */}
@@ -4718,6 +4834,554 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* SECTION 8: ADMIN DIRECT & BROADCAST NOTIFICATIONS (Envio para Todos ou Específico) */}
+      {activeSection === 'notifications' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Header Banner */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono font-bold">
+                  <Send className="h-4 w-4" />
+                  <span>Central de Comunicação & Transmissão</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  Disparo de Mensagens & Notificações
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
+                  Envie comunicados oficiais, avisos urgentes ou mensagens individuais diretamente para a caixa de notificações no perfil dos pescadores.
+                </p>
+              </div>
+
+              {/* Quick Metrics */}
+              <div className="grid grid-cols-3 gap-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800 shrink-0">
+                <div className="px-3 py-2 text-center">
+                  <span className="block text-[10px] font-mono uppercase text-slate-400">Total Enviadas</span>
+                  <span className="text-lg font-black text-amber-400 font-mono">{adminNotifications.length}</span>
+                </div>
+                <div className="px-3 py-2 text-center border-x border-slate-850">
+                  <span className="block text-[10px] font-mono uppercase text-slate-400">Gerais</span>
+                  <span className="text-lg font-black text-emerald-400 font-mono">
+                    {adminNotifications.filter(n => n.targetType === 'all' || !n.targetType).length}
+                  </span>
+                </div>
+                <div className="px-3 py-2 text-center">
+                  <span className="block text-[10px] font-mono uppercase text-slate-400">Diretas/Indiv.</span>
+                  <span className="text-lg font-black text-sky-400 font-mono">
+                    {adminNotifications.filter(n => n.targetType === 'user' || n.targetType === 'tournament').length}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Feedback Alerts */}
+          {notifFormError && (
+            <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-400 rounded-2xl text-xs flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 shrink-0" />
+              <span className="font-semibold">{notifFormError}</span>
+            </div>
+          )}
+
+          {notifFormSuccess && (
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl text-xs flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              <span className="font-semibold">{notifFormSuccess}</span>
+            </div>
+          )}
+
+          {/* Two-Column Grid: Left Compose / Right History */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* LEFT COLUMN: COMPOSE & SEND (7 cols) */}
+            <div className="lg:col-span-7 space-y-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
+                <div className="flex items-center space-x-3 pb-4 border-b border-slate-800">
+                  <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
+                    <PlusCircle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-extrabold text-white">Nova Mensagem / Notificação</h4>
+                    <p className="text-xs text-slate-400">Escolha o público-alvo e componha o comunicado</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSendAdminNotification} className="space-y-5">
+                  {/* Step 1: Select Target Type */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono uppercase text-slate-300 font-bold block">
+                      1. Público-Alvo / Destinatário *
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgTargetType('all');
+                          setMsgSelectedUserId('');
+                        }}
+                        className={`p-3 rounded-2xl border transition text-left cursor-pointer flex flex-col justify-between ${
+                          msgTargetType === 'all'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-bold'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">📢</span>
+                          <span className="text-xs font-extrabold">Todos os Participantes</span>
+                        </div>
+                        <span className={`text-[10px] mt-1 ${msgTargetType === 'all' ? 'text-slate-900 font-semibold' : 'text-slate-500 font-mono'}`}>
+                          Transmissão geral (Broadcast)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMsgTargetType('tournament')}
+                        className={`p-3 rounded-2xl border transition text-left cursor-pointer flex flex-col justify-between ${
+                          msgTargetType === 'tournament'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-bold'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🏆</span>
+                          <span className="text-xs font-extrabold">Por Campeonato</span>
+                        </div>
+                        <span className={`text-[10px] mt-1 ${msgTargetType === 'tournament' ? 'text-slate-900 font-semibold' : 'text-slate-500 font-mono'}`}>
+                          Inscritos em um torneio
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMsgTargetType('user')}
+                        className={`p-3 rounded-2xl border transition text-left cursor-pointer flex flex-col justify-between ${
+                          msgTargetType === 'user'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-bold'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">👤</span>
+                          <span className="text-xs font-extrabold">Pescador Específico</span>
+                        </div>
+                        <span className={`text-[10px] mt-1 ${msgTargetType === 'user' ? 'text-slate-900 font-semibold' : 'text-slate-500 font-mono'}`}>
+                          Mensagem direta individual
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Contextual Target Pickers */}
+                  {msgTargetType === 'tournament' && (
+                    <div className="space-y-1.5 p-4 bg-slate-950 rounded-2xl border border-slate-850 animate-fade-in">
+                      <label className="text-xs font-semibold text-amber-400 font-mono uppercase block">
+                        Selecione o Campeonato:
+                      </label>
+                      <select
+                        value={msgSelectedTourneyId}
+                        onChange={(e) => setMsgSelectedTourneyId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-amber-400 cursor-pointer"
+                      >
+                        {tournaments.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            🏆 {t.title} ({t.status === 'active' ? 'Em andamento' : t.status === 'upcoming' ? 'Em breve' : 'Encerrado'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {msgTargetType === 'user' && (
+                    <div className="space-y-3 p-4 bg-slate-950 rounded-2xl border border-slate-850 animate-fade-in">
+                      <label className="text-xs font-semibold text-amber-400 font-mono uppercase block">
+                        Selecione o Pescador Destinatário:
+                      </label>
+
+                      {/* Search Bar for Users */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nome, apelido, CPF ou e-mail..."
+                          value={msgUserSearch}
+                          onChange={(e) => setMsgUserSearch(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+
+                      {/* Filtered User List / Selector */}
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {registeredUsers
+                          .filter((u) => {
+                            if (!msgUserSearch.trim()) return true;
+                            const q = msgUserSearch.toLowerCase();
+                            return (
+                              u.fullName?.toLowerCase().includes(q) ||
+                              u.displayName?.toLowerCase().includes(q) ||
+                              u.email?.toLowerCase().includes(q) ||
+                              u.cpf?.toLowerCase().includes(q)
+                            );
+                          })
+                          .slice(0, 15)
+                          .map((user) => {
+                            const isSelected = msgSelectedUserId === user.uid;
+                            return (
+                              <button
+                                key={user.uid}
+                                type="button"
+                                onClick={() => setMsgSelectedUserId(user.uid)}
+                                className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                                    : 'bg-slate-900 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center space-x-2.5">
+                                  <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center font-bold text-xs text-amber-400 shrink-0">
+                                    {user.displayName?.charAt(0).toUpperCase() || 'P'}
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-bold text-white">
+                                      {user.fullName || user.displayName || 'Pescador'}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2">
+                                      <span>CPF: {user.cpf || '---'}</span>
+                                      <span>•</span>
+                                      <span className="truncate max-w-[140px]">{user.email}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                {isSelected ? (
+                                  <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[10px] font-black rounded-lg">
+                                    Selecionado ✓
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 hover:text-slate-300">
+                                    Selecionar
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+
+                      {msgSelectedUserId && (
+                        <div className="text-[11px] text-emerald-400 font-mono bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20 flex items-center justify-between">
+                          <span>
+                            Destinatário: <strong>{registeredUsers.find(u => u.uid === msgSelectedUserId)?.fullName || registeredUsers.find(u => u.uid === msgSelectedUserId)?.displayName}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setMsgSelectedUserId('')}
+                            className="text-rose-400 text-[10px] hover:underline"
+                          >
+                            Trocar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Step 2: Message Category */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono uppercase text-slate-300 font-bold block">
+                      2. Categoria / Tipo de Mensagem *
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {[
+                        { key: 'official', label: 'Comunicado Oficial', icon: '📣', color: 'text-amber-400' },
+                        { key: 'urgent', label: 'Aviso Urgente', icon: '🚨', color: 'text-rose-400' },
+                        { key: 'rule', label: 'Regulamento', icon: '📜', color: 'text-sky-400' },
+                        { key: 'reward', label: 'Premiação', icon: '🏆', color: 'text-yellow-400' },
+                        { key: 'direct', label: 'Mensagem Direta', icon: '👤', color: 'text-emerald-400' },
+                      ].map((cat) => {
+                        const isSelected = msgCategory === cat.key;
+                        return (
+                          <button
+                            key={cat.key}
+                            type="button"
+                            onClick={() => setMsgCategory(cat.key as any)}
+                            className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-md'
+                                : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="text-base">{cat.icon}</div>
+                            <div className="text-[11px] font-bold mt-1 truncate">{cat.label}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Quick Preset Templates */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-mono uppercase text-slate-400 block">
+                      Modelos Rápidos / Sugestões de Mensagem:
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgTitle('⏰ Nova Janela de Captura Liberada!');
+                          setMsgContent('Atenção competidores! Uma nova janela de captura e validação foi aberta no campeonato. Fiquem atentos ao horário limite e certifiquem-se de falar a chave antifraude em vídeo contínuo sem cortes!');
+                          setMsgCategory('urgent');
+                        }}
+                        className="px-2.5 py-1 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                      >
+                        + Abertura de Janela
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgTitle('📹 Lembrete: Regra Oficial de Comprovação de Vídeo');
+                          setMsgContent('Para que sua captura seja 100% homologada pela arbitragem, lembre-se: o vídeo deve ser gravado em tomada contínua, sem cortes ou pausas, mostrando peixe vivo, cabeça no zero da régua, medida total e soltura nadando.');
+                          setMsgCategory('rule');
+                        }}
+                        className="px-2.5 py-1 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                      >
+                        + Regra de Vídeo Contínuo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgTitle('🏆 Classificação e Ranking Geral Atualizados');
+                          setMsgContent('O ranking geral do torneio foi atualizado com todas as capturas homologadas pela arbitragem até o momento. Acesse a aba Ranking e confira a pontuação da sua equipe!');
+                          setMsgCategory('reward');
+                        }}
+                        className="px-2.5 py-1 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                      >
+                        + Atualização de Ranking
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMsgTitle('⚠️ Notificação da Moderação / Arbitragem');
+                          setMsgContent('Olá competidor, identificamos uma pendência em seu envio ou cadastro. Por favor verifique seu painel ou entre em contato pelo suporte para maiores esclarecimentos.');
+                          setMsgCategory('direct');
+                        }}
+                        className="px-2.5 py-1 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg text-[11px] font-mono transition cursor-pointer"
+                      >
+                        + Aviso de Arbitragem
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Step 3: Title */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono uppercase text-slate-300 font-bold block">
+                      3. Título do Aviso / Assunto *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: 📢 Comunicado Oficial da Organização - 1ª Etapa"
+                      value={msgTitle}
+                      onChange={(e) => setMsgTitle(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-amber-400 font-semibold"
+                    />
+                  </div>
+
+                  {/* Step 4: Message Body */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-mono uppercase text-slate-300 font-bold block">
+                      4. Conteúdo da Mensagem *
+                    </label>
+                    <textarea
+                      required
+                      rows={5}
+                      placeholder="Digite o texto detalhado da notificação..."
+                      value={msgContent}
+                      onChange={(e) => setMsgContent(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl p-3.5 text-xs sm:text-sm focus:outline-none focus:border-amber-400 leading-relaxed font-sans"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSendingNotif}
+                      className="px-6 py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4 text-slate-950" />
+                      <span>{isSendingNotif ? 'Transmitindo Notificação...' : '🚀 Disparar Notificação para os Pescadores'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            {/* RIGHT COLUMN: LIVE PREVIEW & SENT HISTORY (5 cols) */}
+            <div className="lg:col-span-5 space-y-6">
+              {/* LIVE PREVIEW BOX */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center space-x-2 text-xs font-mono uppercase font-bold text-amber-400">
+                    <Eye className="h-4 w-4" />
+                    <span>Visualização no Perfil do Pescador</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">Prévia em tempo real</span>
+                </div>
+
+                {/* Simulated Notification Card */}
+                <div className={`p-4 rounded-2xl border transition space-y-3 ${
+                  msgCategory === 'urgent'
+                    ? 'bg-rose-500/10 border-rose-500/30'
+                    : msgCategory === 'rule'
+                    ? 'bg-sky-500/10 border-sky-500/30'
+                    : msgCategory === 'reward'
+                    ? 'bg-yellow-500/10 border-yellow-500/30'
+                    : 'bg-amber-500/10 border-amber-500/30'
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">
+                        {msgCategory === 'urgent' ? '🚨' : msgCategory === 'rule' ? '📜' : msgCategory === 'reward' ? '🏆' : msgCategory === 'direct' ? '👤' : '📣'}
+                      </span>
+                      <div>
+                        <h5 className="font-extrabold text-white text-xs">
+                          {msgTitle || 'Título da Notificação'}
+                        </h5>
+                        <div className="text-[10px] font-mono text-slate-400">
+                          {currentUser?.fullName || 'Administração'} • Agora mesmo
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-mono font-black uppercase bg-slate-900 text-amber-400 border border-amber-500/20">
+                      {msgTargetType === 'all' ? 'Geral' : msgTargetType === 'user' ? 'Direta' : 'Campeonato'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                    {msgContent || 'O conteúdo da sua mensagem aparecerá aqui de forma clara e legível para o competidor.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* SENT NOTIFICATIONS HISTORY */}
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center space-x-2 text-xs font-mono uppercase font-bold text-white">
+                    <Radio className="h-4 w-4 text-emerald-400" />
+                    <span>Histórico de Avisos ({adminNotifications.length})</span>
+                  </div>
+                </div>
+
+                {/* Search Filter in History */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Filtrar histórico por título ou texto..."
+                    value={searchSentNotifs}
+                    onChange={(e) => setSearchSentNotifs(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                {/* Notifications List */}
+                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                  {(() => {
+                    const filteredList = adminNotifications.filter(n => {
+                      if (!searchSentNotifs.trim()) return true;
+                      const q = searchSentNotifs.toLowerCase();
+                      return (
+                        n.title?.toLowerCase().includes(q) ||
+                        n.message?.toLowerCase().includes(q) ||
+                        n.targetUserName?.toLowerCase().includes(q) ||
+                        n.tournamentTitle?.toLowerCase().includes(q)
+                      );
+                    });
+
+                    if (filteredList.length === 0) {
+                      return (
+                        <div className="p-8 text-center bg-slate-950/60 rounded-2xl border border-slate-800 space-y-2">
+                          <MessageSquare className="h-6 w-6 text-slate-600 mx-auto" />
+                          <p className="text-xs text-slate-500">Nenhuma notificação enviada no histórico.</p>
+                        </div>
+                      );
+                    }
+
+                    return filteredList.map((notif) => {
+                      const isTargetUser = notif.targetType === 'user';
+                      const isTargetTourney = notif.targetType === 'tournament';
+                      const isDeleting = deletingNotifId === notif.id;
+
+                      return (
+                        <div
+                          key={notif.id}
+                          className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2.5 transition hover:border-slate-700"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-mono font-bold uppercase ${
+                                  isTargetUser
+                                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                    : isTargetTourney
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  {isTargetUser ? `👤 Para: ${notif.targetUserName || 'Usuário'}` : isTargetTourney ? `🏆 ${notif.tournamentTitle || 'Torneio'}` : '📢 Geral (Todos)'}
+                                </span>
+
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {new Date(notif.createdAt).toLocaleDateString('pt-BR')} às {new Date(notif.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+
+                              <h6 className="font-extrabold text-xs text-white pt-1">
+                                {notif.title}
+                              </h6>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isDeleting}
+                              onClick={() => {
+                                setConfirmDialog({
+                                  isOpen: true,
+                                  title: 'Excluir Notificação',
+                                  message: `Tem certeza que deseja excluir a notificação "${notif.title}"? Ela será removida da central.`,
+                                  confirmLabel: 'Excluir',
+                                  variant: 'danger',
+                                  onConfirm: () => {
+                                    handleDeleteAdminNotification(notif.id);
+                                    setConfirmDialog(null);
+                                  }
+                                });
+                              }}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition cursor-pointer shrink-0"
+                              title="Excluir notificação"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          <p className="text-xs text-slate-400 leading-relaxed font-sans line-clamp-3">
+                            {notif.message}
+                          </p>
+
+                          {notif.senderName && (
+                            <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-900 flex items-center justify-between">
+                              <span>Enviado por: <strong className="text-slate-400">{notif.senderName}</strong></span>
+                              <span className="text-slate-600">{notif.senderRole || 'Admin'}</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

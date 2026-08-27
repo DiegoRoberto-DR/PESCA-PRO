@@ -9,9 +9,47 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-// Setup bodyParser with high limit for base64 image uploads
+// Anti-Hacker & Security Headers Middleware
+app.use((req, res, next) => {
+  // Prevent MIME type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Prevent clickjacking while supporting preview iframe
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  // Referrer Policy
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Permissions Policy
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
+  next();
+});
+
+// Setup bodyParser with reasonable limit for base64 image uploads
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Simple in-memory rate limiter for anti-DDoS / anti-bruteforce protection
+const requestCounts = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const MAX_REQUESTS_PER_MINUTE = 60;
+
+app.use('/api/', (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const clientData = requestCounts.get(ip);
+
+  if (!clientData || now > clientData.resetTime) {
+    requestCounts.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return next();
+  }
+
+  if (clientData.count >= MAX_REQUESTS_PER_MINUTE) {
+    return res.status(429).json({
+      error: 'Muitas requisições. Sistema de proteção anti-ataque ativo. Aguarde 1 minuto.'
+    });
+  }
+
+  clientData.count += 1;
+  next();
+});
 
 // Lazy initializer for Google GenAI SDK
 let aiClient: GoogleGenAI | null = null;

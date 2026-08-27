@@ -660,6 +660,52 @@ export async function markNotificationAsRead(notifId: string, userId: string): P
   }
 }
 
+// Send custom admin notification (Broadcast to all or direct to specific user or tournament)
+export async function sendAdminCustomNotification(data: {
+  title: string;
+  message: string;
+  targetType: 'all' | 'tournament' | 'user';
+  userId?: string;
+  targetUserName?: string;
+  targetUserEmail?: string;
+  tournamentId?: string;
+  tournamentTitle?: string;
+  category?: 'official' | 'urgent' | 'rule' | 'reward' | 'direct' | 'general';
+  senderName?: string;
+  senderRole?: string;
+}): Promise<string> {
+  const notifData: Omit<AppNotification, 'id'> = {
+    title: data.title.trim(),
+    message: data.message.trim(),
+    type: data.targetType === 'user' ? 'general' : (data.targetType === 'tournament' ? 'tournament_update' : 'general'),
+    userId: data.targetType === 'user' && data.userId ? data.userId.trim() : undefined,
+    tournamentId: data.tournamentId ? data.tournamentId.trim() : undefined,
+    tournamentTitle: data.tournamentTitle ? data.tournamentTitle.trim() : undefined,
+    readBy: [],
+    createdAt: serverTimestamp()
+  };
+
+  const payload: any = {
+    ...cleanFirestoreData(notifData),
+    targetType: data.targetType,
+    targetUserName: data.targetUserName || undefined,
+    targetUserEmail: data.targetUserEmail || undefined,
+    category: data.category || 'official',
+    senderName: data.senderName || 'Arbitragem / Administração',
+    senderRole: data.senderRole || 'Admin'
+  };
+
+  const docRef = await addDoc(collection(db, 'notifications'), cleanFirestoreData(payload));
+  return docRef.id;
+}
+
+// Delete notification (Admin only)
+export async function deleteNotification(notifId: string): Promise<void> {
+  const docRef = doc(db, 'notifications', notifId);
+  await deleteDoc(docRef);
+}
+
+
 // Delete a tournament
 export async function deleteTournament(tournamentId: string): Promise<void> {
   const docRef = doc(db, 'tournaments', tournamentId);
