@@ -926,28 +926,28 @@ export default function ProfileView({
         <div className="flex flex-wrap bg-[#1b1e22] p-1.5 rounded-2xl border border-slate-800 gap-1">
           <button
             onClick={() => setActiveTab('registration')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'registration'
                 ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <User className="h-4 w-4" />
-            <span>Meu Cadastro</span>
+            <User className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Meu Cadastro</span>
           </button>
 
           <button
             onClick={() => setActiveTab('codes')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'codes'
                 ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Ticket className="h-4 w-4" />
-            <span>Códigos de Inscrição</span>
+            <Ticket className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Códigos de Inscrição</span>
             {visibleUserCodes.length > 0 && (
-              <span className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+              <span className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full whitespace-nowrap ${
                 activeTab === 'codes' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}>
                 {visibleUserCodes.length}
@@ -958,14 +958,14 @@ export default function ProfileView({
           {/* New Tab: Minha Equipe */}
           <button
             onClick={() => setActiveTab('team')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'team'
                 ? 'bg-[#00c853] text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Users className="h-4 w-4" />
-            <span>Minha Equipe</span>
+            <Users className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Minha Equipe</span>
             {userTeam && (
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
             )}
@@ -974,16 +974,16 @@ export default function ProfileView({
           {/* New Tab: Janelas de Captura & Avisos */}
           <button
             onClick={() => setActiveTab('windows')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'windows'
                 ? 'bg-amber-500 text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Clock className="h-4 w-4" />
-            <span>Janelas & Avisos</span>
+            <Clock className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Janelas & Avisos</span>
             {unreadNotifsCount > 0 && (
-              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-rose-500 text-white animate-pulse">
+              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-rose-500 text-white animate-pulse whitespace-nowrap">
                 {unreadNotifsCount}
               </span>
             )}
@@ -991,53 +991,55 @@ export default function ProfileView({
 
           <button
             onClick={() => setActiveTab('submit')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'submit'
                 ? 'bg-sky-500 text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Send className="h-4 w-4" />
-            <span>Enviar Captura</span>
+            <Send className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Enviar Captura</span>
           </button>
 
           <button
             onClick={() => setActiveTab('catches')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'catches'
                 ? 'bg-purple-500 text-white shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Trophy className="h-4 w-4" />
-            <span>Minhas Capturas ({userCatches.length})</span>
+            <Trophy className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Minhas Capturas ({userCatches.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('support')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer relative ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer relative whitespace-nowrap shrink-0 ${
               activeTab === 'support'
                 ? 'bg-emerald-500 text-slate-950 shadow-md font-extrabold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <MessageCircle className="h-4 w-4" />
-            <span>Suporte</span>
-            {userSupportTickets.filter(t => t.status === 'answered').length > 0 && (
-              <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 animate-pulse">
-                {userSupportTickets.filter(t => t.status === 'answered').length}
-              </span>
-            )}
+            <MessageCircle className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap inline-flex items-center gap-1.5">
+              Suporte
+              {userSupportTickets.filter(t => t.status === 'answered').length > 0 && (
+                <span className="text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 animate-pulse whitespace-nowrap">
+                  {userSupportTickets.filter(t => t.status === 'answered').length}
+                </span>
+              )}
+            </span>
           </button>
 
           {/* Regras Button (Válidas para todos os campeonatos) */}
           <button
             onClick={() => setIsRulesModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 shadow-sm"
+            className="px-3.5 py-2 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 shadow-sm whitespace-nowrap shrink-0"
             title="Clique para ler as Regras Oficiais de Comprovação de Captura"
           >
-            <BookOpen className="h-4 w-4 text-emerald-400" />
-            <span>Regras</span>
+            <BookOpen className="h-4 w-4 text-emerald-400 shrink-0" />
+            <span className="whitespace-nowrap">Regras</span>
           </button>
         </div>
       </div>

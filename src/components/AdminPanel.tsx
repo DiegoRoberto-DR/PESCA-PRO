@@ -1821,14 +1821,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           {canModerate && (
             <button
               onClick={() => setActiveSection('moderation')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSection === 'moderation'
                   ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                   : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <Clock className="h-4 w-4" />
-              <span>Homologações ({pendingCount})</span>
+              <Clock className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Homologações ({pendingCount})</span>
             </button>
           )}
 
@@ -1836,38 +1836,38 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             <>
               <button
                 onClick={() => setActiveSection('tournaments')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   activeSection === 'tournaments'
                     ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                     : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <Trophy className="h-4 w-4" />
-                <span>Campeonatos ({tournaments.length})</span>
+                <Trophy className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Campeonatos ({tournaments.length})</span>
               </button>
 
               <button
                 onClick={() => setActiveSection('capture_windows')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   activeSection === 'capture_windows'
                     ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/30 font-black border border-rose-400 animate-pulse'
                     : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white border border-rose-500/20'
                 }`}
               >
-                <Radio className="h-4 w-4 text-rose-400" />
-                <span>⏰ Janelas de Captura (AO VIVO)</span>
+                <Radio className="h-4 w-4 text-rose-400 shrink-0" />
+                <span className="whitespace-nowrap">⏰ Janelas de Captura (AO VIVO)</span>
               </button>
 
               <button
                 onClick={() => setActiveSection('create_tournament')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   activeSection === 'create_tournament'
                     ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                     : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <PlusCircle className="h-4 w-4" />
-                <span>+ Criar Campeonato</span>
+                <PlusCircle className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">+ Criar Campeonato</span>
               </button>
             </>
           )}
@@ -1876,17 +1876,17 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             <>
               <button
                 onClick={() => setActiveSection('teams')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   activeSection === 'teams'
                     ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                     : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <Users className="h-4 w-4" />
-                <span>
+                <Users className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap inline-flex items-center">
                   Equipes ({allTeams.length})
                   {allTeams.filter(t => t.status === 'pending' || !t.status).length > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-400 text-slate-950 text-[10px] rounded-full font-black">
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-amber-400 text-slate-950 text-[10px] rounded-full font-black whitespace-nowrap">
                       {allTeams.filter(t => t.status === 'pending' || !t.status).length} pendente(s)
                     </span>
                   )}
@@ -1895,14 +1895,14 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
               <button
                 onClick={() => setActiveSection('fishermen')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                   activeSection === 'fishermen'
                     ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                     : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                <UserCheck className="h-4 w-4" />
-                <span>Pescadores ({allFishermenList.length})</span>
+                <UserCheck className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">Pescadores ({allFishermenList.length})</span>
               </button>
             </>
           )}
@@ -1910,60 +1910,62 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           {canAntifraud && (
             <button
               onClick={() => setActiveSection('antifraud')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSection === 'antifraud'
                   ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                   : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <Key className="h-4 w-4" />
-              <span>Chaves Antifraude</span>
+              <Key className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">Chaves Antifraude</span>
             </button>
           )}
 
           {/* Notificações & Avisos Tab (Envio Global e Individual) */}
           <button
             onClick={() => setActiveSection('notifications')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeSection === 'notifications'
                 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                 : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
             }`}
           >
-            <Send className="h-4 w-4 text-amber-400" />
-            <span>📢 Notificações ({adminNotifications.length})</span>
+            <Send className="h-4 w-4 text-amber-400 shrink-0" />
+            <span className="whitespace-nowrap">📢 Notificações ({adminNotifications.length})</span>
           </button>
 
           {/* Suporte Tab (Mensagens dos Usuários) */}
           <button
             onClick={() => setActiveSection('support')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeSection === 'support'
                 ? 'bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/20 font-extrabold'
                 : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
             }`}
           >
-            <MessageCircle className="h-4 w-4 text-sky-400" />
-            <span>Suporte ({supportMessages.length})</span>
-            {supportMessages.filter(m => m.status === 'open').length > 0 && (
-              <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[10px] rounded-full font-black animate-pulse">
-                {supportMessages.filter(m => m.status === 'open').length} nova(s)
-              </span>
-            )}
+            <MessageCircle className="h-4 w-4 text-sky-400 shrink-0" />
+            <span className="whitespace-nowrap inline-flex items-center gap-1.5">
+              Suporte ({supportMessages.length})
+              {supportMessages.filter(m => m.status === 'open').length > 0 && (
+                <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[10px] rounded-full font-black animate-pulse whitespace-nowrap">
+                  {supportMessages.filter(m => m.status === 'open').length} nova(s)
+                </span>
+              )}
+            </span>
           </button>
 
           {/* Super Admin Exclusive: Moderator Manager */}
           {canManageModerators && (
             <button
               onClick={() => setActiveSection('moderators')}
-              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition inline-flex items-center space-x-2 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSection === 'moderators'
                   ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 font-extrabold'
                   : 'bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
             >
-              <Shield className="h-4 w-4 text-amber-400" />
-              <span>Moderadores & Equipe</span>
+              <Shield className="h-4 w-4 text-amber-400 shrink-0" />
+              <span className="whitespace-nowrap">Moderadores & Equipe</span>
             </button>
           )}
         </div>

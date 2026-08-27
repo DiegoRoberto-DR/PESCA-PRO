@@ -53,7 +53,7 @@
         "uid": { "type": "string", "maxLength": 128 },
         "name": { "type": "string", "maxLength": 120 },
         "email": { "type": "string", "maxLength": 150 },
-        "role": { "type": "string", "enum": ["angler", "moderator", "admin"] },
+        "role": { "type": "string", "enum": ["participant", "angler", "moderator", "admin"] },
         "cpf": { "type": "string", "maxLength": 20 },
         "phone": { "type": "string", "maxLength": 25 },
         "avatar": { "type": "string" }
