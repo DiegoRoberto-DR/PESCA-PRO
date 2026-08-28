@@ -1191,6 +1191,14 @@ export async function validateAndConsumeTournamentCode(
     }
     const tourData = tourSnap.data() as Tournament;
 
+    // Check if registrations are open/allowed for this tournament
+    if (tourData.allowRegistration === false) {
+      return {
+        success: false,
+        message: '🚫 INSCRIÇÕES SUSPENSAS: As inscrições para este campeonato estão temporariamente fechadas pela organização.'
+      };
+    }
+
     const isTeamTourney = Boolean(tourData.teamFormat && tourData.teamFormat !== 'solo');
     if (isTeamTourney) {
       const requiredSpots = tourData.teamFormat === 'dupla' ? 2 : tourData.teamFormat === 'trio' ? 3 : tourData.teamFormat === 'quarteto' ? 4 : 5;

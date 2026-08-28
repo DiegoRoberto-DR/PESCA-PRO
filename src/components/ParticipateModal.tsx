@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck, Users, Crown, ArrowRight, UserPlus, Trophy, Sparkles } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck, Users, Crown, ArrowRight, UserPlus, Trophy, Sparkles, Lock } from 'lucide-react';
 import { Tournament, UserProfile, Team } from '../types';
 import { validateAndConsumeTournamentCode, getUserTeam } from '../utils/dbHelpers';
 
@@ -98,6 +98,11 @@ export default function ParticipateModal({
 
     if (!currentUser) {
       onRequireAuth();
+      return;
+    }
+
+    if (tournament.allowRegistration === false) {
+      setError('🚫 INSCRIÇÕES SUSPENSAS: As inscrições para este campeonato estão temporariamente fechadas pela organização.');
       return;
     }
 
@@ -258,6 +263,24 @@ export default function ParticipateModal({
                 ? `Código autenticado com sucesso! O Capitão inscreveu a equipe "${userTeam?.name}". Todos os ${requiredSpots} integrantes já estão liberados para registrar capturas.`
                 : 'Código autenticado e de uso único registrado. Você já está habilitado a enviar capturas neste campeonato.'}
             </p>
+          </div>
+        ) : tournament.allowRegistration === false ? (
+          <div className="py-6 text-center space-y-4 animate-fade-in bg-rose-950/20 p-6 rounded-2xl border border-rose-500/30">
+            <div className="inline-flex p-3 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              <Lock className="h-8 w-8" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-white uppercase">INSCRIÇÕES BLOQUEADAS</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                As inscrições para este campeonato estão temporariamente <strong>bloqueadas ou suspensas</strong> pela organização. Fique atento aos avisos oficiais.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              FECHAR
+            </button>
           </div>
         ) : isAlreadyEnrolled ? (
           <div className="py-6 text-center space-y-4 animate-fade-in bg-slate-900/60 p-6 rounded-2xl border border-emerald-500/30">

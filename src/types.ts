@@ -97,6 +97,7 @@ export interface Tournament {
   keyword: string;
   tournamentCode?: string; // Código de participação (opcional) gerado no cadastro
   daysForRegistration?: number; // Dias de inscrição
+  allowRegistration?: boolean; // Liberação de inscrições para membros (true = aberto, false = fechado/bloqueado)
   maxParticipants?: number; // Limite de participantes
   captureWindows?: CaptureWindow[]; // Janelas de captura válidas
   currentPhase?: string;

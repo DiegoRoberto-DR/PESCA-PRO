@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Calendar, Users, Award, Target, DollarSign, Key, Radio, Clock } from 'lucide-react';
+import { Trophy, Calendar, Users, Award, Target, DollarSign, Key, Radio, Clock, Lock, CheckCircle2 } from 'lucide-react';
 import { Tournament } from '../types';
 import { getTournamentLiveStatus } from '../utils/dbHelpers';
 
@@ -81,8 +81,14 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"></div>
         
         {/* Status Badge overlay */}
-        <div className="absolute top-4 right-4 z-10">
+        <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-1.5">
           {getStatusBadge(tournament.status)}
+          {tournament.status !== 'completed' && tournament.allowRegistration === false && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 backdrop-blur-md shadow-md">
+              <Lock className="h-3 w-3 mr-1 text-rose-400" />
+              Inscrições Fechadas
+            </span>
+          )}
         </div>
 
         {/* Live Banner Overlay inside image if live */}
@@ -209,6 +215,14 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             <div className="w-full bg-slate-800/60 text-slate-500 font-semibold text-xs py-2.5 px-4 rounded-xl border border-slate-800 text-center">
               Campeonato Encerrado
             </div>
+          ) : tournament.allowRegistration === false ? (
+            <button
+              onClick={() => onParticipate(tournament)}
+              className="w-full bg-slate-800/90 hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl border border-slate-700 hover:border-slate-600 transition-all active:scale-[0.98] cursor-pointer text-center flex items-center justify-center gap-2 shadow-md"
+            >
+              <Lock className="h-4 w-4 text-rose-400" />
+              <span>Inscrições Bloqueadas</span>
+            </button>
           ) : (
             <button
               onClick={() => onParticipate(tournament)}

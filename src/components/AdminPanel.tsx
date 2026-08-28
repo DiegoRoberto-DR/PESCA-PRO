@@ -245,6 +245,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [imageUrl, setImageUrl] = useState('');
   const [daysForRegistration, setDaysForRegistration] = useState<number>(7);
   const [maxParticipants, setMaxParticipants] = useState<number>(50);
+  const [allowRegistration, setAllowRegistration] = useState<boolean>(true);
   const [participationCode, setParticipationCode] = useState('');
   const [captureWindows, setCaptureWindows] = useState<CaptureWindow[]>([]);
   const [newWindowName, setNewWindowName] = useState('');
@@ -287,6 +288,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editFeeType, setEditFeeType] = useState<'gratis' | 'pago'>('gratis');
   const [editFeeAmount, setEditFeeAmount] = useState('');
   const [editFormat, setEditFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'>('solo');
+  const [editAllowRegistration, setEditAllowRegistration] = useState<boolean>(true);
   const [editImage, setEditImage] = useState('');
   const [editMetric, setEditMetric] = useState<'length' | 'weight' | 'both' | 'points'>('length');
   const [editPointsEnabled, setEditPointsEnabled] = useState(false);
@@ -780,6 +782,23 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     });
   };
 
+  // Quick toggle tournament registration status (Open / Closed)
+  const handleToggleTournamentRegistration = async (t: Tournament) => {
+    const isCurrentlyOpen = t.allowRegistration !== false;
+    const nextState = !isCurrentlyOpen;
+    try {
+      await updateTournament(t.id, { allowRegistration: nextState });
+      showFlashMessage(
+        nextState 
+          ? `🟢 Inscrições do campeonato "${t.title}" foram LIBERADAS com sucesso!` 
+          : `🔒 Inscrições do campeonato "${t.title}" foram BLOQUEADAS/SUSPENSAS!`,
+        'success'
+      );
+    } catch (err: any) {
+      showFlashMessage('Erro ao alterar status das inscrições: ' + err.message, 'error');
+    }
+  };
+
   // Open Tournament Edit Modal
   const handleOpenEditTournament = (t: Tournament) => {
     setEditingTournament(t);
@@ -794,6 +813,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     setEditFeeType(t.entryFeeType || 'gratis');
     setEditFeeAmount(t.entryFeeAmount ? String(t.entryFeeAmount) : '');
     setEditFormat(t.teamFormat || 'solo');
+    setEditAllowRegistration(t.allowRegistration !== false);
     setEditImage(t.imageUrl || IMAGE_PRESETS[0].url);
     setEditMetric(t.metric || 'length');
     
@@ -858,6 +878,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             entryFeeType: editFeeType,
             entryFeeAmount: editFeeType === 'pago' && editFeeAmount ? Number(editFeeAmount) : 0,
             teamFormat: editFormat,
+            allowRegistration: editAllowRegistration,
             imageUrl: editImage,
             metric: effectiveMetric,
             pointsConfig: pointsConfig
@@ -1274,6 +1295,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             entryFeeType: entryFeeType,
             entryFeeAmount: entryFeeType === 'pago' && entryFeeAmount ? Number(entryFeeAmount) : 0,
             teamFormat: teamFormat,
+            allowRegistration: allowRegistration,
             keyword: effectiveKeyword,
             imageUrl: effectiveBannerUrl,
             daysForRegistration: Number(daysForRegistration) || 7,
@@ -1295,6 +1317,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setImageUrl('');
           setDaysForRegistration(7);
           setMaxParticipants(50);
+          setAllowRegistration(true);
           setParticipationCode('');
           setCaptureWindows([]);
           setPointsEnabled(false);
@@ -2699,6 +2722,27 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                       <span className="bg-slate-950/80 text-amber-400 text-[10px] font-mono px-2 py-1 rounded-full border border-amber-500/30 font-bold">
                         🔑 {t.keyword}
                       </span>
+
+                      {/* Registration Status Toggle Badge */}
+                      {t.allowRegistration === false ? (
+                        <button
+                          onClick={() => handleToggleTournamentRegistration(t)}
+                          title="Inscrições bloqueadas. Clique para LIBERAR inscrições para membros."
+                          className="bg-rose-950/90 text-rose-300 text-[10px] font-mono px-2.5 py-1 rounded-full border border-rose-500/50 font-bold flex items-center gap-1 hover:bg-rose-900/80 transition cursor-pointer shadow-md"
+                        >
+                          <Lock className="h-3 w-3 text-rose-400" />
+                          <span>Inscrições: Bloqueadas</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleToggleTournamentRegistration(t)}
+                          title="Inscrições abertas. Clique para BLOQUEAR/SUSPENDER inscrições."
+                          className="bg-emerald-950/90 text-emerald-300 text-[10px] font-mono px-2.5 py-1 rounded-full border border-emerald-500/50 font-bold flex items-center gap-1 hover:bg-emerald-900/80 transition cursor-pointer shadow-md"
+                        >
+                          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                          <span>Inscrições: Liberadas</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Quick switch status buttons with confirmation */}
@@ -3053,18 +3097,93 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
             </div>
 
-            {/* Row: REGRAS DO CAMPEONATO (MULTI-LINE) */}
+            {/* Row: LIBERAÇÃO DE INSCRIÇÕES */}
+            <div className="bg-[#181a1f]/80 p-4 sm:p-5 rounded-2xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-mono font-bold uppercase text-slate-300">
+                    LIBERAÇÃO DE INSCRIÇÕES
+                  </span>
+                  <span className={`text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold ${
+                    allowRegistration
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}>
+                    {allowRegistration ? '🟢 Inscrições Liberadas' : '🔒 Inscrições Bloqueadas'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
+                  Controle se membros podem se inscrever
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Escolha se as inscrições para este campeonato já devem nascer liberadas para os membros ou temporariamente suspensas/fechadas.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAllowRegistration(true)}
+                  className={`p-3.5 rounded-xl border text-left flex items-start space-x-3 transition cursor-pointer ${
+                    allowRegistration
+                      ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-lg shadow-emerald-950/40'
+                      : 'bg-[#121316] border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg shrink-0 ${
+                    allowRegistration ? 'bg-emerald-500 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs sm:text-sm text-white flex items-center gap-1.5">
+                      <span>Liberar Inscrições (Aberto)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+                      Membros e participantes podem se inscrever normalmente pela plataforma.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAllowRegistration(false)}
+                  className={`p-3.5 rounded-xl border text-left flex items-start space-x-3 transition cursor-pointer ${
+                    !allowRegistration
+                      ? 'bg-rose-950/40 border-rose-500 text-white shadow-lg shadow-rose-950/40'
+                      : 'bg-[#121316] border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg shrink-0 ${
+                    !allowRegistration ? 'bg-rose-500 text-white font-bold' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    <Lock className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-xs sm:text-sm text-white flex items-center gap-1.5">
+                      <span>Bloquear / Suspender Inscrições</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">
+                      Inscrições bloqueadas pela organização. Participantes verão o aviso de inscrições fechadas.
+                    </p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Row: DESCRIÇÃO DO CAMPEONATO (MULTI-LINE) */}
             <div>
               <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block flex items-center justify-between">
-                <span>REGRAS DO CAMPEONATO (Uma regra por linha)</span>
-                <span className="text-[10px] text-slate-500">Exibidas detalhadamente no app e perfil</span>
+                <span>DESCRIÇÃO DO CAMPEONATO</span>
+                <span className="text-[10px] text-slate-500">Descrição completa, objetivos, local e detalhes do evento</span>
               </label>
               <textarea
-                rows={4}
-                placeholder="1. Medição obrigatória em fita métrica homologada com a palavra-chave visível.&#10;2. Prática estrita do pesque e solte.&#10;3. Envio da foto com boa iluminação e nitidez da régua.&#10;4. Vídeo de soltura comprovando que o peixe nadou com vida."
-                value={rulesText}
-                onChange={(e) => setRulesText(e.target.value)}
-                className="w-full bg-[#181a1f] border border-slate-800 text-slate-200 rounded-2xl p-4 text-xs sm:text-sm font-sans focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+                rows={5}
+                placeholder="Digite a descrição completa do campeonato, objetivos da competição, regulamento específico, dados do local/represa, premiações e orientações gerais aos competidores..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full bg-[#181a1f] border border-slate-800 text-slate-200 rounded-2xl p-4 text-xs sm:text-sm font-sans min-h-[120px] focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 leading-relaxed"
               />
             </div>
 
@@ -3190,20 +3309,6 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               speciesBonuses={speciesBonuses}
               setSpeciesBonuses={setSpeciesBonuses}
             />
-
-            {/* Row 6: Descrição */}
-            <div>
-              <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                DESCRIÇÃO GERAL DO TORNEIO
-              </label>
-              <textarea
-                rows={3}
-                placeholder="Descreva os objetivos, o local de pesca ou represa, regulamento específico e orientações gerais aos competidores..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm min-h-[90px] focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
-              />
-            </div>
 
             {/* Submit Button matching criar torneio.png */}
             <div className="pt-2">
@@ -5419,12 +5524,13 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
 
               {/* Description */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">Descrição Geral</label>
+                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">Descrição do Campeonato</label>
                 <textarea
-                  rows={3}
+                  rows={4}
+                  placeholder="Descrição completa, regulamento, premiação e detalhes do evento..."
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-amber-500 leading-relaxed"
                 />
               </div>
 
@@ -5440,6 +5546,48 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                   <option value="active">🟢 Ativo (Em Andamento)</option>
                   <option value="completed">🏁 Encerrado / Histórico</option>
                 </select>
+              </div>
+
+              {/* Liberação de Inscrições in Edit Modal */}
+              <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">
+                    Liberação de Inscrições
+                  </label>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
+                    editAllowRegistration
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}>
+                    {editAllowRegistration ? '🟢 Liberadas' : '🔒 Bloqueadas'}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditAllowRegistration(true)}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      editAllowRegistration
+                        ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Liberar Inscrições</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAllowRegistration(false)}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      !editAllowRegistration
+                        ? 'bg-rose-500 text-white font-black shadow-md'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-white'
+                    }`}
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>Bloquear Inscrições</span>
+                  </button>
+                </div>
               </div>
 
               {/* Grid 2 cols: Keyword and Prize */}

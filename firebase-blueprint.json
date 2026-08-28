@@ -19,6 +19,7 @@
         "entryFeeAmount": { "type": "number" },
         "teamFormat": { "type": "string", "enum": ["individual", "dupla", "trio", "quarteto", "equipe5"] },
         "imageUrl": { "type": "string" },
+        "allowRegistration": { "type": "boolean" },
         "participantCount": { "type": "number" }
       },
       "required": ["title", "startDate", "endDate", "status", "targetSpecies", "metric"]
