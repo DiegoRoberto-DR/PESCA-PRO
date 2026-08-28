@@ -95,6 +95,8 @@ import {
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
 import TournamentPointsConfigEditor from './TournamentPointsConfigEditor';
+import TournamentCoverImageEditor from './TournamentCoverImageEditor';
+import TournamentSpeciesEditor from './TournamentSpeciesEditor';
 
 interface AdminPanelProps {
   catches: Catch[];
@@ -220,7 +222,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   });
   const [endDate, setEndDate] = useState('2026-12-31');
   const [status, setStatus] = useState<Tournament['status']>('active');
-  const [targetSpeciesInput, setTargetSpeciesInput] = useState('Tucunaré');
+  const [targetSpeciesList, setTargetSpeciesList] = useState<string[]>(['Tucunaré Azul', 'Tucunaré Amarelo', 'Tucunaré-Açu', 'Tucunaré Paca']);
   const [metric, setMetric] = useState<'length' | 'weight' | 'both' | 'points'>('length');
   
   // Points System Configuration State (Creation)
@@ -290,6 +292,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editFormat, setEditFormat] = useState<'solo' | 'dupla' | 'trio' | 'quarteto' | 'quinteto'>('solo');
   const [editAllowRegistration, setEditAllowRegistration] = useState<boolean>(true);
   const [editImage, setEditImage] = useState('');
+  const [editTargetSpecies, setEditTargetSpecies] = useState<string[]>([]);
   const [editMetric, setEditMetric] = useState<'length' | 'weight' | 'both' | 'points'>('length');
   const [editPointsEnabled, setEditPointsEnabled] = useState(false);
   const [editPointsPerFish, setEditPointsPerFish] = useState<number>(1);
@@ -815,6 +818,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     setEditFormat(t.teamFormat || 'solo');
     setEditAllowRegistration(t.allowRegistration !== false);
     setEditImage(t.imageUrl || IMAGE_PRESETS[0].url);
+    setEditTargetSpecies(t.targetSpecies && t.targetSpecies.length > 0 ? [...t.targetSpecies] : ['Tucunaré']);
     setEditMetric(t.metric || 'length');
     
     // Points config
@@ -822,7 +826,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       setEditPointsEnabled(t.pointsConfig.enabled);
       setEditPointsPerFish(t.pointsConfig.pointsPerFish ?? 1);
       setEditPointsPerCm(t.pointsConfig.pointsPerCm ?? 0);
-      setMinValidLength(t.pointsConfig.minValidLength ?? 25);
+      setEditMinValidLength(t.pointsConfig.minValidLength ?? 25);
       setEditPointRules(t.pointsConfig.pointRules ? [...t.pointsConfig.pointRules] : []);
       setEditSpeciesBonuses(t.pointsConfig.speciesBonus ? [...t.pointsConfig.speciesBonus] : []);
     } else {
@@ -861,8 +865,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             scoringMode: 'ranges',
             pointsPerFish: Number(editPointsPerFish) || 1,
             pointsPerCm: Number(editPointsPerCm) || 0,
+            pointsPerCmEnabled: Number(editPointsPerCm) > 0,
             minValidLength: Number(editMinValidLength) || 25,
             pointRules: editPointRules,
+            speciesBonusEnabled: editSpeciesBonuses.length > 0,
             speciesBonus: editSpeciesBonuses.length > 0 ? editSpeciesBonuses : undefined
           } : undefined;
 
@@ -880,6 +886,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             teamFormat: editFormat,
             allowRegistration: editAllowRegistration,
             imageUrl: editImage,
+            targetSpecies: editTargetSpecies.length > 0 ? editTargetSpecies : ['Tucunaré'],
             metric: effectiveMetric,
             pointsConfig: pointsConfig
           });
@@ -1252,11 +1259,6 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       variant: 'primary',
       onConfirm: async () => {
         setConfirmDialog(null);
-        const species = targetSpeciesInput
-          .split(',')
-          .map(s => s.trim())
-          .filter(s => s.length > 0);
-
         const rules = rulesText.trim()
           ? rulesText.split('\n').map(r => r.trim()).filter(r => r.length > 0)
           : [
@@ -1275,8 +1277,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             scoringMode: 'ranges',
             pointsPerFish: Number(pointsPerFish) || 1,
             pointsPerCm: Number(pointsPerCm) || 0,
+            pointsPerCmEnabled: Number(pointsPerCm) > 0,
             minValidLength: Number(minValidLength) || 25,
             pointRules: pointRules,
+            speciesBonusEnabled: speciesBonuses.length > 0,
             speciesBonus: speciesBonuses.length > 0 ? speciesBonuses : undefined
           } : undefined;
 
@@ -1287,7 +1291,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             startDate: startDate || new Date().toISOString().split('T')[0],
             endDate: endDate || '2026-12-31',
             status: status,
-            targetSpecies: species.length > 0 ? species : ['Tucunaré'],
+            targetSpecies: targetSpeciesList.length > 0 ? targetSpeciesList : ['Tucunaré'],
             metric: effectiveMetric,
             pointsConfig: pointsConfig,
             prize: effectivePrize,
@@ -1315,6 +1319,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setPrizeValue('');
           setKeyword('TORNEIO2026');
           setImageUrl('');
+          setTargetSpeciesList(['Tucunaré Azul', 'Tucunaré Amarelo', 'Tucunaré-Açu', 'Tucunaré Paca']);
           setDaysForRegistration(7);
           setMaxParticipants(50);
           setAllowRegistration(true);
@@ -2697,8 +2702,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between hover:border-slate-700 transition"
               >
                 <div>
-                  {/* Banner Image */}
-                  <div className="relative h-40 bg-slate-950 overflow-hidden">
+                  {/* Banner Image (16:9 Proportional) */}
+                  <div className="relative w-full aspect-[16/9] bg-slate-950 overflow-hidden">
                     <img 
                       src={t.imageUrl} 
                       alt={t.title} 
@@ -3187,44 +3192,18 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               />
             </div>
 
-            {/* Banner Presets / Image URL */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-                <span>URL da Imagem de Capa (ou selecione uma sugestão abaixo):</span>
-                {imageUrl && (
-                  <button 
-                    type="button" 
-                    onClick={() => setImageUrl('')}
-                    className="text-xs text-rose-400 hover:underline cursor-pointer"
-                  >
-                    Limpar
-                  </button>
-                )}
-              </div>
-              <input
-                type="text"
-                placeholder="https://images.unsplash.com/..."
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500 font-mono"
-              />
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {IMAGE_PRESETS.map((p, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => setImageUrl(p.url)}
-                    className={`relative rounded-xl overflow-hidden cursor-pointer border-2 transition ${
-                      imageUrl === p.url ? 'border-[#00e676] scale-[1.02]' : 'border-slate-800 opacity-60 hover:opacity-100'
-                    }`}
-                  >
-                    <img src={p.url} alt={p.name} referrerPolicy="no-referrer" className="h-16 w-full object-cover" />
-                    <div className="absolute inset-0 bg-slate-950/60 p-1 flex items-end">
-                      <span className="text-[10px] font-bold text-white truncate">{p.name}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* Capa do Campeonato com Editor Completo (Upload / Sugestões / URL) */}
+            <TournamentCoverImageEditor
+              imageUrl={imageUrl}
+              setImageUrl={setImageUrl}
+              tournamentTitle={title || 'Título do Campeonato'}
+            />
+
+            {/* Editor de Espécies Válidas do Campeonato */}
+            <TournamentSpeciesEditor
+              speciesList={targetSpeciesList}
+              setSpeciesList={setTargetSpeciesList}
+            />
 
             {/* Row 3: DIAS DE INSCRIÇÃO & LIMITE DE PARTICIPANTES */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5645,6 +5624,23 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                     className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
                   />
                 </div>
+              </div>
+
+              {/* Capa do Campeonato in Edit Modal */}
+              <div className="pt-2">
+                <TournamentCoverImageEditor
+                  imageUrl={editImage}
+                  setImageUrl={setEditImage}
+                  tournamentTitle={editTitle || 'Título do Campeonato'}
+                />
+              </div>
+
+              {/* Tournament Species Editor in Edit Modal */}
+              <div className="pt-2">
+                <TournamentSpeciesEditor
+                  speciesList={editTargetSpecies}
+                  setSpeciesList={setEditTargetSpecies}
+                />
               </div>
 
               {/* Tournament Points Config Editor in Edit Modal */}

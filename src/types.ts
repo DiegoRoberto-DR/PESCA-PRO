@@ -54,9 +54,11 @@ export interface TournamentPointsConfig {
   scoringMode?: 'ranges' | 'per_cm' | 'fish_count' | 'custom_rules';
   pointsPerFish?: number; // Pontos base fixos por peixe aprovado (ex: 1 ponto)
   pointsPerCm?: number; // Pontos multiplicados por centímetro (ex: 1 pt/cm)
+  pointsPerCmEnabled?: boolean; // Se pontos extras por cm estão ativos
   minValidLength?: number; // Tamanho mínimo para peixe ter validade/pontuar (ex: 25 cm)
   rules?: PointRule[]; // Faixas de tamanho configuradas
   pointRules?: PointRule[]; // Alias de rules para compatibilidade
+  speciesBonusEnabled?: boolean; // Toggle se bônus por espécie está ativo
   speciesBonus?: SpeciesBonusRule[]; // Bônus por espécie nobre
   customNotes?: string;
 }

@@ -70,8 +70,8 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:shadow-2xl hover:border-slate-700 transition-all duration-300 flex flex-col group h-full relative">
-      {/* Target Image & Cover */}
-      <div className="relative h-48 sm:h-52 w-full overflow-hidden bg-slate-950">
+      {/* Target Image & Cover (Exact 16:9 Aspect Ratio) */}
+      <div className="relative w-full aspect-[16/9] overflow-hidden bg-slate-950">
         <img 
           src={tournament.imageUrl} 
           alt={tournament.title}

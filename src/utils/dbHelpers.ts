@@ -488,7 +488,7 @@ export function calculateCatchPoints(
   }
 
   // 2. Points per cm (e.g. 1 pt/cm)
-  if (cfg.pointsPerCm && cfg.pointsPerCm > 0) {
+  if (cfg.pointsPerCmEnabled !== false && cfg.pointsPerCm && cfg.pointsPerCm > 0) {
     const cmPts = Math.round(length * cfg.pointsPerCm * 10) / 10;
     totalPoints += cmPts;
     breakdownParts.push(`${cmPts} pts (${length} cm × ${cfg.pointsPerCm} pt/cm)`);
@@ -515,7 +515,7 @@ export function calculateCatchPoints(
   }
 
   // 4. Species Bonus
-  if (cfg.speciesBonus && cfg.speciesBonus.length > 0) {
+  if (cfg.speciesBonusEnabled !== false && cfg.speciesBonus && cfg.speciesBonus.length > 0) {
     const bonus = cfg.speciesBonus.find(b => b.species && b.species.toLowerCase() === species);
     if (bonus && bonus.bonusPoints > 0) {
       totalPoints += bonus.bonusPoints;
