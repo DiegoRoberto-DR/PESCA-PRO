@@ -1130,6 +1130,22 @@ export default function ProfileView({
               </div>
 
               <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold uppercase text-slate-400">WhatsApp (Contato)</span>
+                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    📱 Verificado
+                  </span>
+                </div>
+                <span className="text-sm font-mono font-bold text-emerald-300 block mt-1">
+                  {currentUser.whatsapp || currentUser.phone ? (
+                    currentUser.whatsapp || currentUser.phone
+                  ) : (
+                    <span className="text-slate-500 italic text-xs font-normal">Não informado</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="bg-[#1a1c20] p-4 rounded-2xl border border-slate-800/80">
                 <span className="text-[10px] font-mono font-bold uppercase text-slate-400 block">E-mail de Login</span>
                 <span className="text-xs font-mono text-slate-200 block mt-1 truncate">
                   {currentUser.email}

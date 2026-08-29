@@ -768,12 +768,15 @@ export function subscribeUsers(callback: (users: UserProfile[]) => void) {
 export async function registerFisherman(data: {
   fullName: string;
   cpf: string;
+  phone?: string;
+  whatsapp?: string;
   email: string;
   address: string;
   nickname: string;
   password: string;
 }): Promise<UserProfile> {
   const emailClean = data.email.trim().toLowerCase();
+  const phoneVal = (data.phone || data.whatsapp || '').trim();
   
   // Check if user already exists
   const existingSnapshot = await getDocs(collection(db, 'users'));
@@ -793,6 +796,8 @@ export async function registerFisherman(data: {
     displayName: data.nickname?.trim() || data.fullName.trim(),
     fullName: data.fullName.trim(),
     cpf: data.cpf.trim(),
+    phone: phoneVal,
+    whatsapp: phoneVal,
     email: emailClean,
     address: data.address.trim(),
     nickname: data.nickname.trim(),

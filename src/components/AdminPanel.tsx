@@ -308,6 +308,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [editFullName, setEditFullName] = useState('');
   const [editCpf, setEditCpf] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editNickname, setEditNickname] = useState('');
   const [editAddress, setEditAddress] = useState('');
@@ -1404,6 +1405,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     setEditingUser(user);
     setEditFullName(user.fullName || user.displayName || '');
     setEditCpf(user.cpf || '');
+    setEditPhone(user.whatsapp || user.phone || '');
     setEditEmail(user.email || '');
     setEditNickname(user.nickname || user.displayName || '');
     setEditAddress(user.address || '');
@@ -1422,6 +1424,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
         displayName: editNickname.trim() || editFullName.trim(),
         nickname: editNickname.trim(),
         cpf: editCpf.trim(),
+        phone: editPhone.trim(),
+        whatsapp: editPhone.trim(),
         email: editEmail.trim(),
         address: editAddress.trim(),
         status: editUserStatusVal
@@ -1777,6 +1781,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
       (u.fullName && u.fullName.toLowerCase().includes(q)) ||
       (u.email && u.email.toLowerCase().includes(q)) ||
       (u.cpf && u.cpf.toLowerCase().includes(q)) ||
+      (u.phone && u.phone.toLowerCase().includes(q)) ||
+      (u.whatsapp && u.whatsapp.toLowerCase().includes(q)) ||
       (u.address && u.address.toLowerCase().includes(q)) ||
       (u.nickname && u.nickname.toLowerCase().includes(q))
     );
@@ -3757,6 +3763,7 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                         <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
                           <th className="py-4 px-6">Pescador / Apelido</th>
                           <th className="py-4 px-4">CPF (Vinculado)</th>
+                          <th className="py-4 px-4">WhatsApp / Contato</th>
                           <th className="py-4 px-4">E-mail</th>
                           <th className="py-4 px-4">Inscrições & Códigos</th>
                           <th className="py-4 px-4">Status</th>
@@ -3770,6 +3777,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                             (c.assignedToUserEmail && c.assignedToUserEmail.toLowerCase() === f.email?.toLowerCase())
                           );
                           const paidCodesCount = userCodes.filter(c => c.paymentStatus === 'paid').length;
+                          const userPhone = f.whatsapp || f.phone;
+                          const cleanDigits = userPhone ? userPhone.replace(/\D/g, '') : '';
 
                           return (
                             <tr key={f.uid} className="border-b border-slate-800/80 text-slate-300 hover:bg-slate-800/30 transition">
@@ -3797,6 +3806,24 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                                     <CreditCard className="h-3 w-3 text-slate-400" />
                                     {f.cpf}
                                   </span>
+                                ) : (
+                                  <span className="text-slate-600 italic">Não informado</span>
+                                )}
+                              </td>
+
+                              {/* WhatsApp / Contato */}
+                              <td className="py-3.5 px-4 font-mono text-[11px]">
+                                {userPhone ? (
+                                  <a
+                                    href={`https://wa.me/55${cleanDigits}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold transition"
+                                    title="Conversar com pescador no WhatsApp"
+                                  >
+                                    <Phone className="h-3 w-3" />
+                                    <span>{userPhone}</span>
+                                  </a>
                                 ) : (
                                   <span className="text-slate-600 italic">Não informado</span>
                                 )}
@@ -5858,17 +5885,33 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">E-mail</label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-                  <input
-                    type="email"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-sky-500"
-                  />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">E-mail</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                    <input
+                      type="email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-emerald-400 font-mono uppercase">WhatsApp com DDD</label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-2.5 h-4 w-4 text-emerald-500" />
+                    <input
+                      type="text"
+                      placeholder="(00) 90000-0000"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      className="w-full bg-slate-950 border border-emerald-500/40 text-emerald-200 rounded-xl pl-9 pr-4 py-2 text-xs font-mono focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
                 </div>
               </div>
 

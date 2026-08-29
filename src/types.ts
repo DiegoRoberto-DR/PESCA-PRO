@@ -237,6 +237,8 @@ export interface UserProfile {
   displayName: string;
   fullName?: string;
   cpf?: string;
+  phone?: string; // Telefone / WhatsApp com DDD
+  whatsapp?: string; // WhatsApp com DDD
   email: string;
   address?: string;
   nickname?: string;

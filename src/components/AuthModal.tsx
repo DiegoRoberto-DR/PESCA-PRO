@@ -14,7 +14,9 @@ import {
   UserPlus,
   Shield,
   Eye,
-  EyeOff
+  EyeOff,
+  Phone,
+  MessageSquare
 } from 'lucide-react';
 import { UserProfile } from '../types';
 import { registerFisherman, authenticateUser } from '../utils/dbHelpers';
@@ -36,6 +38,7 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
   // Register Form States (strictly for fishermen)
   const [fullName, setFullName] = useState('');
   const [cpf, setCpf] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [nickname, setNickname] = useState('');
@@ -60,6 +63,22 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
       formatted = `${numeric.slice(0, 3)}.${numeric.slice(3)}`;
     }
     setCpf(formatted);
+  };
+
+  // Format WhatsApp / Phone with DDD helper ( (00) 00000-0000 )
+  const handlePhoneChange = (value: string) => {
+    const numeric = value.replace(/\D/g, '').slice(0, 11);
+    let formatted = numeric;
+    if (numeric.length > 10) {
+      // 11 digits: (99) 99999-9999
+      formatted = `(${numeric.slice(0, 2)}) ${numeric.slice(2, 7)}-${numeric.slice(7, 11)}`;
+    } else if (numeric.length > 6) {
+      // 10 digits or in progress: (99) 9999-9999
+      formatted = `(${numeric.slice(0, 2)}) ${numeric.slice(2, 6)}-${numeric.slice(6)}`;
+    } else if (numeric.length > 2) {
+      formatted = `(${numeric.slice(0, 2)}) ${numeric.slice(2)}`;
+    }
+    setPhone(formatted);
   };
 
   // Handle Login Submit
@@ -111,6 +130,11 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
       setErrorMessage('Por favor, informe um CPF válido com 11 dígitos.');
       return;
     }
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10) {
+      setErrorMessage('Por favor, informe seu número de WhatsApp com DDD obrigatório (ex: (11) 98765-4321).');
+      return;
+    }
     if (!email.trim() || !email.includes('@')) {
       setErrorMessage('Por favor, informe um endereço de e-mail válido.');
       return;
@@ -137,6 +161,8 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
       const newUser = await registerFisherman({
         fullName: fullName.trim(),
         cpf: cpf.trim(),
+        phone: phone.trim(),
+        whatsapp: phone.trim(),
         email: email.trim(),
         address: address.trim(),
         nickname: nickname.trim(),
@@ -329,7 +355,7 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
                 </div>
               </div>
 
-              {/* Grid: CPF & Apelido */}
+              {/* Grid: CPF & WhatsApp com DDD */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* CPF */}
                 <div className="space-y-1">
@@ -349,6 +375,33 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
                   </div>
                 </div>
 
+                {/* WhatsApp com DDD */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-semibold text-emerald-400 font-mono uppercase tracking-wider flex items-center gap-1">
+                      <Phone className="h-3 w-3" />
+                      <span>WhatsApp com DDD *</span>
+                    </label>
+                    <span className="text-[9px] font-mono text-emerald-400/90 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                      Obrigatório
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <Phone className="absolute left-3.5 top-3 text-emerald-500 h-4 w-4" />
+                    <input
+                      type="text"
+                      placeholder="(00) 90000-0000"
+                      value={phone}
+                      onChange={(e) => handlePhoneChange(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-emerald-500/40 focus:border-emerald-400 text-emerald-200 rounded-xl pl-10 pr-4 py-2 text-xs font-mono focus:outline-none transition shadow-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid: Apelido & Email */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Apelido de Pesca */}
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-slate-400 font-mono uppercase tracking-wider block">
@@ -366,25 +419,24 @@ export default function AuthModal({ onClose, onLogin, initialMode = 'login' }: A
                     />
                   </div>
                 </div>
-              </div>
 
-              {/* Email */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-slate-400 font-mono uppercase tracking-wider block">
-                  E-mail *
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-3 text-slate-500 h-4 w-4" />
-                  <input
-                    type="email"
-                    placeholder="seu.email@provedor.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 text-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none transition"
-                  />
+                {/* Email */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-semibold text-slate-400 font-mono uppercase tracking-wider block">
+                    E-mail *
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-3 text-slate-500 h-4 w-4" />
+                    <input
+                      type="email"
+                      placeholder="seu.email@provedor.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 text-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none transition"
+                    />
+                  </div>
                 </div>
-                <span className="text-[9px] text-slate-500 font-mono">Você usará este e-mail para fazer login.</span>
               </div>
 
               {/* Endereço */}
