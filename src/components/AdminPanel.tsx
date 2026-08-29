@@ -3046,18 +3046,97 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               </div>
             </div>
 
-            {/* Row 2: Prize Description */}
-            <div>
-              <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                DESCRIÇÃO DA PREMIAÇÃO
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: 1º Troféu + R$ 3.000 | 2º Troféu + R$ 1.500 | 3º R$ 500"
+            {/* Row 2: Prize Description (Multi-line supported) */}
+            <div className="space-y-2 bg-[#181a1f] border border-slate-800 rounded-3xl p-5 shadow-lg">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 flex items-center gap-1.5">
+                  <Award className="h-4 w-4 text-amber-400" />
+                  <span>DESCRIÇÃO DA PREMIAÇÃO (Linhas Separadas por Colocação)</span>
+                </label>
+                
+                {/* Fast Preset Buttons */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setPrize('1º Lugar Troféu + R$ 100,00\n2º Lugar Troféu\n3º Lugar Troféu')}
+                    className="text-[11px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-lg font-bold transition cursor-pointer"
+                  >
+                    🏆 Padrão (1º, 2º e 3º)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrize('1º Lugar: Troféu + R$ 1.000,00\n2º Lugar: Troféu + R$ 500,00\n3º Lugar: Troféu + R$ 250,00\n🐟 Maior Peixe: Troféu Especial')}
+                    className="text-[11px] bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-bold transition cursor-pointer"
+                  >
+                    💰 Com Maior Peixe
+                  </button>
+                  {prize && (
+                    <button
+                      type="button"
+                      onClick={() => setPrize('')}
+                      className="text-[11px] text-slate-400 hover:text-rose-400 px-2 py-1 transition cursor-pointer"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                rows={3}
+                placeholder={"1º Lugar Troféu + R$ 100,00\n2º Lugar Troféu\n3º Lugar Troféu"}
                 value={prize}
                 onChange={(e) => setPrize(e.target.value)}
-                className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3.5 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition placeholder-slate-500"
+                className="w-full bg-[#121316] border border-slate-800 text-amber-200 rounded-2xl p-4 text-xs sm:text-sm font-sans focus:outline-none focus:border-amber-500 transition placeholder-slate-600 leading-relaxed resize-y"
               />
+
+              {/* Quick Append Buttons */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">Inserir:</span>
+                <button
+                  type="button"
+                  onClick={() => setPrize(prev => prev ? `${prev}\n1º Lugar: ` : '1º Lugar: ')}
+                  className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2 py-0.5 rounded-md font-bold transition cursor-pointer"
+                >
+                  + 1º Lugar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrize(prev => prev ? `${prev}\n2º Lugar: ` : '2º Lugar: ')}
+                  className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2 py-0.5 rounded-md font-bold transition cursor-pointer"
+                >
+                  + 2º Lugar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrize(prev => prev ? `${prev}\n3º Lugar: ` : '3º Lugar: ')}
+                  className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2 py-0.5 rounded-md font-bold transition cursor-pointer"
+                >
+                  + 3º Lugar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrize(prev => prev ? `${prev}\nMaior Peixe do Campeonato: Troféu` : 'Maior Peixe do Campeonato: Troféu')}
+                  className="text-[10px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2 py-0.5 rounded-md font-bold transition cursor-pointer"
+                >
+                  + Maior Peixe
+                </button>
+              </div>
+
+              {/* Live Preview Box */}
+              {prize.trim() && (
+                <div className="mt-3 p-3.5 bg-slate-950/90 rounded-2xl border border-amber-500/20 flex items-start gap-2.5">
+                  <Award className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[9px] font-mono text-amber-400/80 uppercase font-bold block mb-1">
+                      Pré-visualização no Card do Campeonato:
+                    </span>
+                    <div className="text-xs text-amber-200 font-medium whitespace-pre-line leading-relaxed">
+                      {prize}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Row: DATES (START / END) & STATUS */}
@@ -5593,14 +5672,50 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 font-mono uppercase">Descrição dos Prêmios</label>
-                <input
-                  type="text"
+              <div className="space-y-2 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase flex items-center gap-1.5">
+                    <Award className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Descrição da Premiação (Linhas Separadas)</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditPrize('1º Lugar Troféu + R$ 100,00\n2º Lugar Troféu\n3º Lugar Troféu')}
+                      className="text-[10px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-lg font-bold transition cursor-pointer"
+                    >
+                      🏆 Padrão (1º, 2º e 3º)
+                    </button>
+                    {editPrize && (
+                      <button
+                        type="button"
+                        onClick={() => setEditPrize('')}
+                        className="text-[10px] text-slate-500 hover:text-rose-400 px-1.5 py-0.5 transition cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <textarea
+                  rows={3}
                   value={editPrize}
                   onChange={(e) => setEditPrize(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  placeholder={"1º Lugar Troféu + R$ 100,00\n2º Lugar Troféu\n3º Lugar Troféu"}
+                  className="w-full bg-[#121316] border border-slate-800 text-amber-200 rounded-xl p-3 text-xs focus:outline-none focus:border-amber-500 resize-y font-sans leading-relaxed"
                 />
+
+                {editPrize.trim() && (
+                  <div className="p-2.5 bg-slate-900/90 rounded-xl border border-amber-500/20">
+                    <span className="text-[9px] font-mono text-amber-400/80 uppercase font-bold block mb-1">
+                      Prévia das Linhas:
+                    </span>
+                    <div className="text-[11px] text-amber-200 font-medium whitespace-pre-line leading-relaxed">
+                      {editPrize}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dates */}

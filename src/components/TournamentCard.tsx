@@ -199,11 +199,11 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
           <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
             <div className="flex items-start space-x-2">
               <Award className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="text-[10px] font-mono text-amber-400/80 tracking-wider uppercase">Premiação</span>
-                <p className="text-xs text-amber-200 mt-0.5 leading-relaxed font-medium">
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] font-mono text-amber-400/80 tracking-wider uppercase block">Premiação</span>
+                <div className="text-xs text-amber-200 mt-0.5 leading-relaxed font-medium whitespace-pre-line">
                   {tournament.prize}
-                </p>
+                </div>
               </div>
             </div>
           </div>
