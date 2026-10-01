@@ -64,7 +64,7 @@ export default function OfficialRulerGraphic() {
           {/* QR Code Graphic */}
           <div className="flex items-center gap-1 pr-2 sm:pr-3">
             <div className="flex flex-col items-center bg-black p-1 rounded border border-[#00c853]">
-              <div className="w-5 h-5 bg-white p-0.5 grid grid-cols-4 gap-0.5 rounded-sm">
+              <div className="w-5 h-5 bg-emerald-400 p-0.5 grid grid-cols-4 gap-0.5 rounded-sm">
                 <div className="bg-black col-span-2 row-span-2" />
                 <div className="bg-black" />
                 <div className="bg-black" />
@@ -79,23 +79,23 @@ export default function OfficialRulerGraphic() {
         </div>
 
         {/* 2. MAIN MEASURING BODY (Graduated 0 to 100 cm) */}
-        <div className="w-full bg-white text-slate-950 font-mono flex border-x-2 border-slate-700 shadow-inner relative overflow-hidden text-[10px] sm:text-xs">
+        <div className="w-full bg-[#10131a] text-slate-100 font-mono flex border-x-2 border-slate-700 shadow-inner relative overflow-hidden text-[10px] sm:text-xs">
           
           {/* Subtle Watermark */}
-          <div className="absolute inset-0 flex items-center justify-center opacity-[0.05] pointer-events-none">
-            <svg viewBox="0 0 500 150" className="w-[90%] h-auto text-black" fill="currentColor">
+          <div className="absolute inset-0 flex items-center justify-center opacity-[0.04] pointer-events-none">
+            <svg viewBox="0 0 500 150" className="w-[90%] h-auto text-white" fill="currentColor">
               <path d="M 450,75 C 400,30 280,25 180,50 C 130,62 80,55 30,75 C 80,95 130,88 180,100 C 280,125 400,120 450,75 Z" />
             </svg>
           </div>
 
           {/* LEFT NEON GREEN SCALE */}
-          <div className="w-12 sm:w-16 bg-[#00c853] border-r border-black/80 py-1.5 px-1 flex flex-col justify-between select-none z-10">
+          <div className="w-12 sm:w-16 bg-[#00c853] border-r border-black/80 py-1.5 px-1 flex flex-col justify-between select-none z-10 shadow-md">
             <div className="text-[8px] sm:text-[9px] font-black text-black text-center border-b border-black/20 pb-0.5 leading-none">
               CM
             </div>
             <div className="space-y-1.5 sm:space-y-2 text-center">
               {[0, 10, 20, 30, 40, 50, 65, 80, 90, 100].map((cm) => (
-                <div key={cm} className="font-black text-[9px] sm:text-[11px] leading-tight text-black flex items-center justify-between px-0.5">
+                <div key={cm} className="font-black text-[9px] sm:text-[11px] leading-tight text-slate-950 flex items-center justify-between px-0.5">
                   <span>{cm}</span>
                   <span className="w-1.5 h-0.5 bg-black" />
                 </div>
@@ -103,67 +103,67 @@ export default function OfficialRulerGraphic() {
             </div>
           </div>
 
-          {/* CENTER GRADUATED BODY WITH RED HIGHLIGHT MARKS */}
-          <div className="flex-1 py-1.5 px-2 z-10 flex flex-col justify-between space-y-1.5 sm:space-y-2">
+          {/* CENTER GRADUATED BODY WITH RED/EMERALD HIGHLIGHT MARKS */}
+          <div className="flex-1 py-1.5 px-2 z-10 flex flex-col justify-between space-y-1.5 sm:space-y-2 bg-gradient-to-r from-slate-900/90 via-[#0d1017] to-slate-900/90">
             {/* 0cm */}
-            <div className="flex items-center justify-between border-b border-black pb-0.5">
-              <span className="font-black text-[9px] sm:text-[10px] text-black">0 cm (Marco Zero)</span>
-              <div className="flex-1 mx-1.5 h-px bg-black" />
-              <span className="text-[8px] text-slate-600 font-mono">Encosto</span>
+            <div className="flex items-center justify-between border-b border-emerald-500/60 pb-0.5">
+              <span className="font-black text-[9px] sm:text-[10px] text-emerald-400">0 cm (Marco Zero)</span>
+              <div className="flex-1 mx-1.5 h-px bg-emerald-500/40" />
+              <span className="text-[8px] text-emerald-300 font-mono">Encosto 90°</span>
             </div>
 
             {/* 10cm */}
-            <div className="flex items-center justify-between border-b border-slate-300 pb-0.5 text-[9px] sm:text-[10px]">
-              <span className="font-bold text-slate-800">10 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-slate-300" />
-              <span className="text-[8px] text-slate-500">100 mm</span>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-0.5 text-[9px] sm:text-[10px]">
+              <span className="font-bold text-slate-300">10 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-slate-800" />
+              <span className="text-[8px] text-slate-400">100 mm</span>
             </div>
 
-            {/* 20cm (Red Highlight) */}
-            <div className="flex items-center justify-between border-b border-rose-400 bg-rose-50/70 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
-              <span className="font-black text-rose-600">● 20 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-rose-400" />
-              <span className="text-[8px] font-bold text-rose-600">200 mm</span>
+            {/* 20cm (Highlight) */}
+            <div className="flex items-center justify-between border-b border-amber-500/40 bg-amber-500/10 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
+              <span className="font-black text-amber-300">● 20 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-amber-500/30" />
+              <span className="text-[8px] font-bold text-amber-400">200 mm</span>
             </div>
 
-            {/* 35cm (Red Highlight) */}
-            <div className="flex items-center justify-between border-b border-rose-400 bg-rose-50/70 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
-              <span className="font-black text-rose-600">● 35 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-rose-400" />
-              <span className="text-[8px] font-bold text-rose-600">350 mm</span>
+            {/* 35cm (Highlight) */}
+            <div className="flex items-center justify-between border-b border-amber-500/40 bg-amber-500/10 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
+              <span className="font-black text-amber-300">● 35 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-amber-500/30" />
+              <span className="text-[8px] font-bold text-amber-400">350 mm</span>
             </div>
 
             {/* 50cm - TROFÉU */}
-            <div className="flex items-center justify-between border border-rose-500 bg-rose-100/90 px-1.5 py-0.5 rounded text-[9px] sm:text-[11px] shadow-xs">
-              <span className="font-black text-rose-700">★ 50 cm</span>
-              <div className="flex-1 mx-1.5 h-0.5 bg-rose-600" />
-              <span className="font-black text-rose-700 text-[8px] sm:text-[9px]">TROFÉU (500 mm)</span>
+            <div className="flex items-center justify-between border border-emerald-500/60 bg-emerald-500/15 px-1.5 py-0.5 rounded text-[9px] sm:text-[11px] shadow-sm">
+              <span className="font-black text-emerald-300">★ 50 cm</span>
+              <div className="flex-1 mx-1.5 h-0.5 bg-emerald-500" />
+              <span className="font-black text-emerald-400 text-[8px] sm:text-[9px]">TROFÉU (500 mm)</span>
             </div>
 
             {/* 65cm */}
-            <div className="flex items-center justify-between border-b border-slate-300 pb-0.5 text-[9px] sm:text-[10px]">
-              <span className="font-bold text-slate-800">65 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-slate-300" />
-              <span className="text-[8px] text-slate-500">650 mm</span>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-0.5 text-[9px] sm:text-[10px]">
+              <span className="font-bold text-slate-300">65 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-slate-800" />
+              <span className="text-[8px] text-slate-400">650 mm</span>
             </div>
 
-            {/* 80cm (Red Highlight) */}
-            <div className="flex items-center justify-between border-b border-rose-400 bg-rose-50/70 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
-              <span className="font-black text-rose-600">● 80 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-rose-400" />
-              <span className="text-[8px] font-bold text-rose-600">800 mm</span>
+            {/* 80cm (Highlight) */}
+            <div className="flex items-center justify-between border-b border-rose-500/40 bg-rose-500/10 px-1 py-0.5 rounded text-[9px] sm:text-[10px]">
+              <span className="font-black text-rose-300">● 80 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-rose-500/30" />
+              <span className="text-[8px] font-bold text-rose-400">800 mm</span>
             </div>
 
             {/* 90cm */}
-            <div className="flex items-center justify-between border-b border-slate-300 pb-0.5 text-[9px] sm:text-[10px]">
-              <span className="font-bold text-slate-800">90 cm</span>
-              <div className="flex-1 mx-1.5 h-px bg-slate-300" />
-              <span className="text-[8px] text-slate-500">900 mm</span>
+            <div className="flex items-center justify-between border-b border-slate-800 pb-0.5 text-[9px] sm:text-[10px]">
+              <span className="font-bold text-slate-300">90 cm</span>
+              <div className="flex-1 mx-1.5 h-px bg-slate-800" />
+              <span className="text-[8px] text-slate-400">900 mm</span>
             </div>
           </div>
 
           {/* RIGHT CONTRAST SCALE */}
-          <div className="w-10 sm:w-14 bg-black text-white py-1.5 px-1 border-l border-black flex flex-col justify-between z-10 select-none">
+          <div className="w-10 sm:w-14 bg-black text-white py-1.5 px-1 border-l border-slate-800 flex flex-col justify-between z-10 select-none">
             <div className="text-[7px] sm:text-[8px] font-mono text-emerald-400 text-center border-b border-slate-800 pb-0.5 leading-none">
               BLOCO
             </div>
