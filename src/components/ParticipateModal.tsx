@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck, Users, Crown, ArrowRight, UserPlus, Trophy, Sparkles, Lock } from 'lucide-react';
-import { Tournament, UserProfile, Team } from '../types';
-import { validateAndConsumeTournamentCode, getUserTeam } from '../utils/dbHelpers';
+import { X, CheckCircle2, AlertCircle, MessageCircle, Key, ShieldCheck, Users, Crown, ArrowRight, UserPlus, Trophy, Sparkles, Lock, Clock } from 'lucide-react';
+import { Tournament, UserProfile, Team, RegistrationCountdownInfo } from '../types';
+import { validateAndConsumeTournamentCode, getUserTeam, getTournamentRegistrationCountdown } from '../utils/dbHelpers';
+import RegistrationCountdown from './RegistrationCountdown';
 
 interface ParticipateModalProps {
   isOpen: boolean;
@@ -64,6 +65,8 @@ export default function ParticipateModal({
     (userTeam && userTeam.tournamentIds?.includes(tournament.id))
   );
 
+  const regCountdown = getTournamentRegistrationCountdown(tournament);
+
   // Check if current user is captain
   const isCaptain = Boolean(
     currentUser &&
@@ -104,6 +107,21 @@ export default function ParticipateModal({
     if (tournament.allowRegistration === false) {
       setError('🚫 INSCRIÇÕES SUSPENSAS: As inscrições para este campeonato estão temporariamente fechadas pela organização.');
       return;
+    }
+
+    if (regCountdown && !regCountdown.canRegister) {
+      if (regCountdown.status === 'closed') {
+        setError(`🚫 PRAZO ENCERRADO: As inscrições para este campeonato foram finalizadas em ${regCountdown.registrationEndDateFormatted}. Não é mais possível se inscrever.`);
+        return;
+      }
+      if (regCountdown.status === 'not_started') {
+        setError(`⏳ INSCRIÇÕES EM BREVE: As inscrições para este campeonato iniciam em ${regCountdown.registrationStartDateFormatted}.`);
+        return;
+      }
+      if (regCountdown.status === 'completed') {
+        setError('🚫 CAMPEONATO ENCERRADO: Este campeonato já foi finalizado.');
+        return;
+      }
     }
 
     // Check team requirements for team-based tournaments
@@ -251,6 +269,11 @@ export default function ParticipateModal({
           )}
         </div>
 
+        {/* Countdown Banner */}
+        <div className="mb-5">
+          <RegistrationCountdown tournament={tournament} mode="card" showTournamentDates={true} />
+        </div>
+
         {/* Success Alert */}
         {success ? (
           <div className="py-8 text-center space-y-3 animate-fade-in">
@@ -280,6 +303,45 @@ export default function ParticipateModal({
               className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition uppercase tracking-wider cursor-pointer"
             >
               FECHAR
+            </button>
+          </div>
+        ) : regCountdown && regCountdown.status === 'closed' ? (
+          <div className="py-6 text-center space-y-4 animate-fade-in bg-rose-950/20 p-6 rounded-2xl border border-rose-500/30">
+            <div className="inline-flex p-3 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              <Lock className="h-8 w-8" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-white uppercase">INSCRIÇÕES ENCERRADAS</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                O prazo oficial para inscrições neste campeonato encerrou em <strong>{regCountdown.registrationEndDateFormatted}</strong>.
+              </p>
+              <p className="text-[11px] text-slate-400 font-mono mt-1">
+                Período oficial da competição/pesca: <strong>{regCountdown.tournamentStartDateFormatted} a {regCountdown.tournamentEndDateFormatted}</strong>
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              FECHAR
+            </button>
+          </div>
+        ) : regCountdown && regCountdown.status === 'not_started' ? (
+          <div className="py-6 text-center space-y-4 animate-fade-in bg-sky-950/20 p-6 rounded-2xl border border-sky-500/30">
+            <div className="inline-flex p-3 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30">
+              <Clock className="h-8 w-8 text-sky-400 animate-pulse" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-white uppercase">INSCRIÇÕES EM BREVE</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                As inscrições para este campeonato iniciarão em <strong>{regCountdown.registrationStartDateFormatted}</strong>.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm py-3 px-4 rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              ENTENDI
             </button>
           </div>
         ) : isAlreadyEnrolled ? (

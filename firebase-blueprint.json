@@ -20,6 +20,8 @@
         "teamFormat": { "type": "string", "enum": ["individual", "dupla", "trio", "quarteto", "equipe5"] },
         "imageUrl": { "type": "string" },
         "allowRegistration": { "type": "boolean" },
+        "registrationStartDate": { "type": "string" },
+        "registrationEndDate": { "type": "string" },
         "participantCount": { "type": "number" }
       },
       "required": ["title", "startDate", "endDate", "status", "targetSpecies", "metric"]

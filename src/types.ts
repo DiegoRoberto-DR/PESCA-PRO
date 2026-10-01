@@ -85,8 +85,10 @@ export interface Tournament {
   title: string;
   description: string;
   rules: string[];
-  startDate: string;
-  endDate: string;
+  startDate: string; // Data de início da competição/pesca oficial
+  endDate: string; // Data de término da competição/pesca oficial
+  registrationStartDate?: string; // Data de início das inscrições (separada do início da prova)
+  registrationEndDate?: string; // Data limite/encerramento das inscrições (separada do início/término da prova)
   status: 'active' | 'upcoming' | 'completed';
   targetSpecies: string[];
   metric: 'length' | 'weight' | 'both' | 'points';
@@ -273,4 +275,22 @@ export interface SupportMessage {
   answeredAt?: any;
   createdAt: any;
   updatedAt?: any;
+}
+
+export interface RegistrationCountdownInfo {
+  status: 'open' | 'not_started' | 'closed' | 'manual_locked' | 'completed';
+  isOpen: boolean;
+  canRegister: boolean;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  totalMsRemaining: number;
+  formattedCountdown: string; // Ex: "03d 14h 22m 10s" ou "14h 22m 10s"
+  label: string; // "Inscrições Encerram Em" | "Inscrições Abrem Em" | "Inscrições Encerradas" | "Inscrições Bloqueadas"
+  isUrgent: boolean; // Menos de 24 horas restantes enquanto aberto
+  registrationStartDateFormatted?: string; // "01/10/2026" ou "01/10/2026 às 08:00"
+  registrationEndDateFormatted: string; // "15/10/2026" ou "15/10/2026 às 23:59"
+  tournamentStartDateFormatted: string;
+  tournamentEndDateFormatted: string;
 }

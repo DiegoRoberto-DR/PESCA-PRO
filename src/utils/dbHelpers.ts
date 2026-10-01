@@ -16,7 +16,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification, SupportMessage, TournamentPointsConfig, PointRule, SpeciesBonusRule, TournamentWinner } from '../types';
+import { Tournament, Catch, Comment, UserProfile, TournamentCode, Team, TeamMember, CaptureWindow, AppNotification, SupportMessage, TournamentPointsConfig, PointRule, SpeciesBonusRule, TournamentWinner, RegistrationCountdownInfo } from '../types';
 
 // Helper to remove any undefined fields before sending to Firestore (prevents Firebase Unsupported undefined errors)
 export function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
@@ -1202,6 +1202,28 @@ export async function validateAndConsumeTournamentCode(
         success: false,
         message: '🚫 INSCRIÇÕES SUSPENSAS: As inscrições para este campeonato estão temporariamente fechadas pela organização.'
       };
+    }
+
+    const regCountdown = getTournamentRegistrationCountdown(tourData);
+    if (!regCountdown.canRegister) {
+      if (regCountdown.status === 'closed') {
+        return {
+          success: false,
+          message: `🚫 PRAZO ENCERRADO: As inscrições para este campeonato foram encerradas em ${regCountdown.registrationEndDateFormatted}. Não é mais possível se inscrever.`
+        };
+      }
+      if (regCountdown.status === 'not_started') {
+        return {
+          success: false,
+          message: `⏳ INSCRIÇÕES EM BREVE: As inscrições para este campeonato iniciam em ${regCountdown.registrationStartDateFormatted}.`
+        };
+      }
+      if (regCountdown.status === 'completed') {
+        return {
+          success: false,
+          message: '🚫 CAMPEONATO FINALIZADO: Este campeonato já foi encerrado.'
+        };
+      }
     }
 
     const isTeamTourney = Boolean(tourData.teamFormat && tourData.teamFormat !== 'solo');
@@ -2491,6 +2513,221 @@ export function getTournamentLiveStatus(tournament: Tournament, now = new Date()
     activeWindow: activeWin,
     upcomingWindow: upcomingWin,
     timeRemainingStr: timeRemaining
+  };
+}
+
+/**
+ * Converte strings de data do torneio de forma flexível (YYYY-MM-DD ou YYYY-MM-DDTHH:mm ou ISO)
+ * Se defaultEndOfDay for true e a string não tiver horário explícito, fixa em 23:59:59.999.
+ */
+export function parseTournamentDate(dateStr?: string, defaultEndOfDay: boolean = false): Date | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+
+  try {
+    if (trimmed.includes('T')) {
+      const parsed = new Date(trimmed);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    // Formato comum YYYY-MM-DD
+    const parts = trimmed.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      if (defaultEndOfDay) {
+        return new Date(year, month, day, 23, 59, 59, 999);
+      } else {
+        return new Date(year, month, day, 0, 0, 0, 0);
+      }
+    }
+    const generic = new Date(trimmed);
+    if (!isNaN(generic.getTime())) return generic;
+  } catch (e) {
+    console.error('Erro ao converter data do campeonato:', dateStr, e);
+  }
+  return null;
+}
+
+/**
+ * Formata data no padrão brasileiro DD/MM/AAAA (opcionalmente com horário HH:mm)
+ */
+export function formatDateTimeBR(date: Date | null, includeTime: boolean = false): string {
+  if (!date || isNaN(date.getTime())) return 'A definir';
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  if (includeTime) {
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} às ${hours}:${minutes}`;
+  }
+  return `${day}/${month}/${year}`;
+}
+
+/**
+ * Helper principal para calcular o status e a contagem regressiva das inscrições do campeonato.
+ * A data de inscrição é separada da data de início e término do torneio.
+ */
+export function getTournamentRegistrationCountdown(
+  tournament: Tournament,
+  now = new Date()
+): RegistrationCountdownInfo {
+  // 1. Data de Encerramento das Inscrições:
+  // Se registrationEndDate estiver definida, usa ela (com final do dia caso não tenha horário especificado)
+  // Caso contrário, fallback para startDate (23:59:59) para compatibilidade retroativa
+  const endDate = parseTournamentDate(tournament.registrationEndDate, true) || 
+                  parseTournamentDate(tournament.startDate, true) || 
+                  new Date(2099, 11, 31, 23, 59, 59);
+
+  // 2. Data de Início das Inscrições:
+  // Se registrationStartDate estiver definida, usa ela (início do dia 00:00 se não tiver hora)
+  // Caso contrário, presume-se que as inscrições já iniciaram
+  const startDate = parseTournamentDate(tournament.registrationStartDate, false);
+
+  // Períodos formatados para exibição
+  const tourneyStart = parseTournamentDate(tournament.startDate, false);
+  const tourneyEnd = parseTournamentDate(tournament.endDate, true);
+  const tournamentStartDateFormatted = formatDateTimeBR(tourneyStart, false);
+  const tournamentEndDateFormatted = formatDateTimeBR(tourneyEnd, false);
+
+  const regHasExplicitTime = Boolean(
+    (tournament.registrationEndDate && tournament.registrationEndDate.includes('T')) ||
+    (tournament.registrationStartDate && tournament.registrationStartDate.includes('T'))
+  );
+
+  const registrationStartDateFormatted = startDate ? formatDateTimeBR(startDate, regHasExplicitTime) : 'Imediato';
+  const registrationEndDateFormatted = formatDateTimeBR(endDate, regHasExplicitTime);
+
+  const nowMs = now.getTime();
+  const endMs = endDate.getTime();
+  const startMs = startDate ? startDate.getTime() : 0;
+
+  // Se o torneio já estiver finalizado
+  if (tournament.status === 'completed') {
+    return {
+      status: 'completed',
+      isOpen: false,
+      canRegister: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      totalMsRemaining: 0,
+      formattedCountdown: 'Campeonato Finalizado',
+      label: 'Campeonato Finalizado',
+      isUrgent: false,
+      registrationStartDateFormatted,
+      registrationEndDateFormatted,
+      tournamentStartDateFormatted,
+      tournamentEndDateFormatted
+    };
+  }
+
+  // Se o admin bloqueou manualmente as inscrições
+  if (tournament.allowRegistration === false) {
+    return {
+      status: 'manual_locked',
+      isOpen: false,
+      canRegister: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      totalMsRemaining: 0,
+      formattedCountdown: 'Inscrições Bloqueadas',
+      label: 'Inscrições Bloqueadas pela Organização',
+      isUrgent: false,
+      registrationStartDateFormatted,
+      registrationEndDateFormatted,
+      tournamentStartDateFormatted,
+      tournamentEndDateFormatted
+    };
+  }
+
+  // Se as inscrições iniciam em uma data futura
+  if (startDate && nowMs < startMs) {
+    const diffMs = Math.max(0, startMs - nowMs);
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+
+    const formattedCountdown = days > 0
+      ? `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`
+      : `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+
+    return {
+      status: 'not_started',
+      isOpen: false,
+      canRegister: false,
+      days,
+      hours,
+      minutes,
+      seconds,
+      totalMsRemaining: diffMs,
+      formattedCountdown,
+      label: 'Inscrições Abrem Em',
+      isUrgent: false,
+      registrationStartDateFormatted,
+      registrationEndDateFormatted,
+      tournamentStartDateFormatted,
+      tournamentEndDateFormatted
+    };
+  }
+
+  // Se já ultrapassou o prazo limite de encerramento das inscrições
+  if (nowMs >= endMs) {
+    return {
+      status: 'closed',
+      isOpen: false,
+      canRegister: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+      totalMsRemaining: 0,
+      formattedCountdown: 'Inscrições Encerradas',
+      label: 'Inscrições Encerradas',
+      isUrgent: false,
+      registrationStartDateFormatted,
+      registrationEndDateFormatted,
+      tournamentStartDateFormatted,
+      tournamentEndDateFormatted
+    };
+  }
+
+  // INSCRIÇÕES ABERTAS E EM CONTAGEM REGRESSIVA!
+  const remainingMs = Math.max(0, endMs - nowMs);
+  const days = Math.floor(remainingMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((remainingMs % (1000 * 60)) / 1000);
+
+  const formattedCountdown = days > 0 
+    ? `${days}d ${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
+    : `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+
+  // Urgente se faltarem menos de 24 horas para o encerramento
+  const isUrgent = remainingMs <= 24 * 60 * 60 * 1000;
+
+  return {
+    status: 'open',
+    isOpen: true,
+    canRegister: true,
+    days,
+    hours,
+    minutes,
+    seconds,
+    totalMsRemaining: remainingMs,
+    formattedCountdown,
+    label: 'Inscrições Encerram Em',
+    isUrgent,
+    registrationStartDateFormatted,
+    registrationEndDateFormatted,
+    tournamentStartDateFormatted,
+    tournamentEndDateFormatted
   };
 }
 

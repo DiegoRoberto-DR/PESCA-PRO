@@ -90,13 +90,15 @@ import {
   calculateCatchPoints,
   subscribeNotifications,
   sendAdminCustomNotification,
-  deleteNotification
+  deleteNotification,
+  getTournamentRegistrationCountdown
 } from '../utils/dbHelpers';
 import ConfirmationModal from './ConfirmationModal';
 import ModeratorManager from './ModeratorManager';
 import TournamentPointsConfigEditor from './TournamentPointsConfigEditor';
 import TournamentCoverImageEditor from './TournamentCoverImageEditor';
 import TournamentSpeciesEditor from './TournamentSpeciesEditor';
+import RegistrationCountdown from './RegistrationCountdown';
 
 interface AdminPanelProps {
   catches: Catch[];
@@ -216,8 +218,23 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [rulesText, setRulesText] = useState('');
+  // Datas de Inscrição (separadas do início e término da competição)
+  const [registrationStartDate, setRegistrationStartDate] = useState(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
+  const [registrationStartTime, setRegistrationStartTime] = useState('00:00');
+  const [registrationEndDate, setRegistrationEndDate] = useState(() => {
+    const target = new Date();
+    target.setDate(target.getDate() + 15);
+    return target.toISOString().split('T')[0];
+  });
+  const [registrationEndTime, setRegistrationEndTime] = useState('23:59');
+
+  // Datas da Competição/Pesca Oficial
   const [startDate, setStartDate] = useState(() => {
     const today = new Date();
+    today.setDate(today.getDate() + 16);
     return today.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState('2026-12-31');
@@ -285,6 +302,10 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
   const [editPrize, setEditPrize] = useState('');
   const [editPrizeValue, setEditPrizeValue] = useState('');
   const [editKeyword, setEditKeyword] = useState('');
+  const [editRegistrationStartDate, setEditRegistrationStartDate] = useState('');
+  const [editRegistrationStartTime, setEditRegistrationStartTime] = useState('00:00');
+  const [editRegistrationEndDate, setEditRegistrationEndDate] = useState('');
+  const [editRegistrationEndTime, setEditRegistrationEndTime] = useState('23:59');
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
   const [editFeeType, setEditFeeType] = useState<'gratis' | 'pago'>('gratis');
@@ -812,6 +833,15 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
     setEditPrize(t.prize);
     setEditPrizeValue(t.prizeValue ? String(t.prizeValue) : '');
     setEditKeyword(t.keyword);
+    // Inscrições (Data e Hora)
+    const regStartParts = (t.registrationStartDate || t.startDate || '').split('T');
+    setEditRegistrationStartDate(regStartParts[0] || '');
+    setEditRegistrationStartTime(regStartParts[1] || '00:00');
+
+    const regEndParts = (t.registrationEndDate || t.startDate || '').split('T');
+    setEditRegistrationEndDate(regEndParts[0] || '');
+    setEditRegistrationEndTime(regEndParts[1] || '23:59');
+
     setEditStartDate(t.startDate);
     setEditEndDate(t.endDate);
     setEditFeeType(t.entryFeeType || 'gratis');
@@ -882,6 +912,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             keyword: editKeyword.trim().toUpperCase(),
             startDate: editStartDate,
             endDate: editEndDate,
+            registrationStartDate: editRegistrationStartDate ? (editRegistrationStartTime ? `${editRegistrationStartDate}T${editRegistrationStartTime}` : editRegistrationStartDate) : undefined,
+            registrationEndDate: editRegistrationEndDate ? (editRegistrationEndTime ? `${editRegistrationEndDate}T${editRegistrationEndTime}` : editRegistrationEndDate) : undefined,
             entryFeeType: editFeeType,
             entryFeeAmount: editFeeType === 'pago' && editFeeAmount ? Number(editFeeAmount) : 0,
             teamFormat: editFormat,
@@ -1291,6 +1323,8 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
             rules: rules,
             startDate: startDate || new Date().toISOString().split('T')[0],
             endDate: endDate || '2026-12-31',
+            registrationStartDate: registrationStartDate ? (registrationStartTime ? `${registrationStartDate}T${registrationStartTime}` : registrationStartDate) : undefined,
+            registrationEndDate: registrationEndDate ? (registrationEndTime ? `${registrationEndDate}T${registrationEndTime}` : registrationEndDate) : undefined,
             status: status,
             targetSpecies: targetSpeciesList.length > 0 ? targetSpeciesList : ['Tucunaré'],
             metric: effectiveMetric,
@@ -1321,6 +1355,12 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
           setKeyword('TORNEIO2026');
           setImageUrl('');
           setTargetSpeciesList(['Tucunaré Azul', 'Tucunaré Amarelo', 'Tucunaré-Açu', 'Tucunaré Paca']);
+          setRegistrationStartDate(new Date().toISOString().split('T')[0]);
+          setRegistrationStartTime('00:00');
+          const resetEnd = new Date();
+          resetEnd.setDate(resetEnd.getDate() + 15);
+          setRegistrationEndDate(resetEnd.toISOString().split('T')[0]);
+          setRegistrationEndTime('23:59');
           setDaysForRegistration(7);
           setMaxParticipants(50);
           setAllowRegistration(true);
@@ -2876,10 +2916,16 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 </div>
 
                 {/* Footer Toolbar */}
-                <div className="px-6 pb-6 pt-2 border-t border-slate-800/60 flex items-center justify-between">
-                  <span className="text-xs text-slate-500 font-mono">
-                    Vigência: {t.startDate} até {t.endDate}
-                  </span>
+                <div className="px-6 pb-6 pt-3 border-t border-slate-800/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-mono">
+                    <span className="text-slate-400">
+                      🎣 <strong>Prova:</strong> {t.startDate} a {t.endDate}
+                    </span>
+                    <span className="text-emerald-400">
+                      📝 <strong>Inscrições:</strong> {t.registrationEndDate ? t.registrationEndDate.replace('T', ' às ') : t.startDate}
+                    </span>
+                    <RegistrationCountdown tournament={t} mode="badge" />
+                  </div>
 
                   <div className="flex items-center space-x-2">
                     {t.status !== 'completed' && (
@@ -3145,45 +3191,137 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
               )}
             </div>
 
-            {/* Row: DATES (START / END) & STATUS */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  DATA DE INÍCIO GERAL
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
-                />
+            {/* Bloco 1: PERÍODO DE INSCRIÇÕES (DIFERENTE DO TORNEIO) */}
+            <div className="bg-[#181a1f]/90 p-4 sm:p-5 rounded-2xl border border-emerald-500/30 space-y-4 shadow-lg shadow-emerald-950/20">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-mono font-bold uppercase text-white tracking-wider flex items-center gap-1.5">
+                      <span>PERÍODO DAS INSCRIÇÕES</span>
+                      <span className="text-[10px] text-emerald-400 font-normal">(Separado da Data da Prova)</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Defina a data/hora em que as inscrições abrem e encerram. O contador regressivo em tempo real mostrará quanto tempo falta para terminar as inscrições.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2.5 py-1 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 self-start sm:self-auto shrink-0">
+                  <Timer className="h-3 w-3" />
+                  Contador Automático Ativo
+                </span>
               </div>
 
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  DATA DE TÉRMINO GERAL
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-[#00e676] transition"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Início das Inscrições */}
+                <div className="space-y-1.5 bg-[#121316] p-3 rounded-xl border border-slate-800">
+                  <label className="text-[10px] font-mono font-bold uppercase text-emerald-400 flex items-center justify-between">
+                    <span>1. Início das Inscrições</span>
+                    <span className="text-slate-500 text-[9px]">Data & Horário</span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="date"
+                      value={registrationStartDate}
+                      onChange={(e) => setRegistrationStartDate(e.target.value)}
+                      className="col-span-2 bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-500 transition"
+                    />
+                    <input
+                      type="time"
+                      value={registrationStartTime}
+                      onChange={(e) => setRegistrationStartTime(e.target.value)}
+                      className="col-span-1 bg-[#181a1f] border border-slate-800 text-white rounded-xl px-2 py-2 text-xs font-mono focus:outline-none focus:border-emerald-500 transition text-center"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    Quando os competidores são liberados para se inscrever.
+                  </span>
+                </div>
+
+                {/* Encerramento das Inscrições */}
+                <div className="space-y-1.5 bg-[#121316] p-3 rounded-xl border border-emerald-500/30">
+                  <label className="text-[10px] font-mono font-bold uppercase text-amber-400 flex items-center justify-between">
+                    <span>2. Encerramento das Inscrições</span>
+                    <span className="text-amber-400/90 text-[9px] font-bold">Prazo Final do Contador</span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="date"
+                      value={registrationEndDate}
+                      onChange={(e) => setRegistrationEndDate(e.target.value)}
+                      className="col-span-2 bg-[#181a1f] border border-slate-800 text-white rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-amber-400 transition"
+                    />
+                    <input
+                      type="time"
+                      value={registrationEndTime}
+                      onChange={(e) => setRegistrationEndTime(e.target.value)}
+                      className="col-span-1 bg-[#181a1f] border border-slate-800 text-white rounded-xl px-2 py-2 text-xs font-mono focus:outline-none focus:border-amber-400 transition text-center"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    Data e horário limite de encerramento das inscrições.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bloco 2: PERÍODO DA COMPETIÇÃO / PESCA & STATUS */}
+            <div className="bg-[#181a1f]/90 p-4 sm:p-5 rounded-2xl border border-sky-500/30 space-y-4">
+              <div className="flex items-center space-x-2 border-b border-slate-800 pb-3">
+                <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
+                  <Calendar className="h-4 w-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-mono font-bold uppercase text-white tracking-wider">
+                    PERÍODO DA COMPETIÇÃO / PESCA OFICIAL
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Datas em que os competidores estarão na água e poderão enviar capturas válidas.
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
-                  STATUS INICIAL
-                </label>
-                <select
-                  value={status}
-                  onChange={(e: any) => setStatus(e.target.value)}
-                  className="w-full bg-[#181a1f] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition cursor-pointer"
-                >
-                  <option value="active">🟢 Ativo (Inscrições e Capturas Abertas)</option>
-                  <option value="upcoming">⏳ Em Breve (Divulgação / Pré-inscrição)</option>
-                  <option value="completed">🏁 Encerrado</option>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-[10px] font-mono font-bold uppercase text-sky-400 mb-1.5 block">
+                    INÍCIO DA COMPETIÇÃO / PESCA
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full bg-[#121316] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-sky-400 transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono font-bold uppercase text-sky-400 mb-1.5 block">
+                    TÉRMINO DA COMPETIÇÃO / PESCA
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full bg-[#121316] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm font-mono focus:outline-none focus:border-sky-400 transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-mono font-bold uppercase text-slate-400 mb-1.5 block">
+                    STATUS INICIAL
+                  </label>
+                  <select
+                    value={status}
+                    onChange={(e: any) => setStatus(e.target.value)}
+                    className="w-full bg-[#121316] border border-slate-800 text-white rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#00e676] transition cursor-pointer"
+                  >
+                    <option value="active">🟢 Ativo (Inscrições e Prova)</option>
+                    <option value="upcoming">⏳ Em Breve (Divulgação / Pré-inscrição)</option>
+                    <option value="completed">🏁 Encerrado</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -5745,26 +5883,93 @@ export default function AdminPanel({ catches, tournaments, currentUser }: AdminP
                 )}
               </div>
 
-              {/* Dates */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">Data Início</label>
-                  <input
-                    type="date"
-                    value={editStartDate}
-                    onChange={(e) => setEditStartDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
-                  />
+              {/* PERÍODO DAS INSCRIÇÕES (Modal de Edição) */}
+              <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-emerald-500/30 space-y-3">
+                <div className="flex items-center space-x-2 border-b border-slate-800 pb-2">
+                  <Clock className="h-4 w-4 text-emerald-400" />
+                  <span className="text-xs font-mono font-bold uppercase text-emerald-300">
+                    Período das Inscrições (Contador Regressivo)
+                  </span>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300 font-mono uppercase">Data Término</label>
-                  <input
-                    type="date"
-                    value={editEndDate}
-                    onChange={(e) => setEditEndDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Início Inscrições */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase text-emerald-400 font-bold block">
+                      Início das Inscrições
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <input
+                        type="date"
+                        value={editRegistrationStartDate}
+                        onChange={(e) => setEditRegistrationStartDate(e.target.value)}
+                        className="col-span-2 bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-emerald-500"
+                      />
+                      <input
+                        type="time"
+                        value={editRegistrationStartTime}
+                        onChange={(e) => setEditRegistrationStartTime(e.target.value)}
+                        className="col-span-1 bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-emerald-500 text-center"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Término Inscrições */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase text-amber-400 font-bold block">
+                      Encerramento das Inscrições
+                    </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <input
+                        type="date"
+                        value={editRegistrationEndDate}
+                        onChange={(e) => setEditRegistrationEndDate(e.target.value)}
+                        className="col-span-2 bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-amber-400"
+                      />
+                      <input
+                        type="time"
+                        value={editRegistrationEndTime}
+                        onChange={(e) => setEditRegistrationEndTime(e.target.value)}
+                        className="col-span-1 bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-amber-400 text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* PERÍODO DA COMPETIÇÃO / PESCA (Modal de Edição) */}
+              <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-sky-500/30 space-y-3">
+                <div className="flex items-center space-x-2 border-b border-slate-800 pb-2">
+                  <Calendar className="h-4 w-4 text-sky-400" />
+                  <span className="text-xs font-mono font-bold uppercase text-sky-300">
+                    Período da Competição / Pesca Oficial
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                      Data Início da Pesca
+                    </label>
+                    <input
+                      type="date"
+                      value={editStartDate}
+                      onChange={(e) => setEditStartDate(e.target.value)}
+                      className="w-full bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                      Data Término da Pesca
+                    </label>
+                    <input
+                      type="date"
+                      value={editEndDate}
+                      onChange={(e) => setEditEndDate(e.target.value)}
+                      className="w-full bg-[#121316] border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-sky-400"
+                    />
+                  </div>
                 </div>
               </div>
 

@@ -1,7 +1,8 @@
-import React from 'react';
-import { Trophy, Calendar, Users, Award, Target, DollarSign, Key, Radio, Clock, Lock, CheckCircle2 } from 'lucide-react';
-import { Tournament } from '../types';
-import { getTournamentLiveStatus } from '../utils/dbHelpers';
+import React, { useState, useEffect } from 'react';
+import { Trophy, Calendar, Users, Award, Target, DollarSign, Key, Radio, Clock, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Tournament, RegistrationCountdownInfo } from '../types';
+import { getTournamentLiveStatus, getTournamentRegistrationCountdown } from '../utils/dbHelpers';
+import RegistrationCountdown from './RegistrationCountdown';
 
 interface TournamentCardProps {
   key?: string;
@@ -12,6 +13,17 @@ interface TournamentCardProps {
 
 export default function TournamentCard({ tournament, onParticipate, isLoggedIn }: TournamentCardProps) {
   const liveInfo = getTournamentLiveStatus(tournament);
+  const [regStatus, setRegStatus] = useState<RegistrationCountdownInfo>(() =>
+    getTournamentRegistrationCountdown(tournament, new Date())
+  );
+
+  useEffect(() => {
+    setRegStatus(getTournamentRegistrationCountdown(tournament, new Date()));
+    const timer = setInterval(() => {
+      setRegStatus(getTournamentRegistrationCountdown(tournament, new Date()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [tournament]);
 
   const getStatusBadge = (status: Tournament['status']) => {
     if (liveInfo.isLive) {
@@ -64,7 +76,8 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
 
   // Format date range nicely
   const formatDateStr = (dateStr: string) => {
-    const [year, month, day] = dateStr.split('-');
+    if (!dateStr) return '';
+    const [year, month, day] = dateStr.split('T')[0].split('-');
     return `${day}/${month}/${year}`;
   };
 
@@ -87,6 +100,12 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 backdrop-blur-md shadow-md">
               <Lock className="h-3 w-3 mr-1 text-rose-400" />
               Inscrições Fechadas
+            </span>
+          )}
+          {tournament.status !== 'completed' && tournament.allowRegistration !== false && regStatus.status === 'closed' && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 backdrop-blur-md shadow-md">
+              <Lock className="h-3 w-3 mr-1 text-rose-400" />
+              Inscrições Encerradas
             </span>
           )}
         </div>
@@ -160,6 +179,15 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             </div>
           </div>
 
+          {/* CONTADOR REGRESSIVO DAS INSCRIÇÕES */}
+          <div className="pt-1">
+            <RegistrationCountdown 
+              tournament={tournament} 
+              mode="card" 
+              showTournamentDates={true} 
+            />
+          </div>
+
           {/* Points rules tag if enabled */}
           {(tournament.pointsConfig?.enabled || tournament.metric === 'points') && (
             <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-[11px] font-mono text-amber-400">
@@ -172,23 +200,23 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             </div>
           )}
 
-          {/* Info grid */}
-          <div className="grid grid-cols-2 gap-3 border-y border-slate-800 py-3.5 text-xs">
+          {/* Info grid com Datas Distintas (Torneio vs Inscrições) */}
+          <div className="grid grid-cols-2 gap-3 border-y border-slate-800 py-3 text-xs">
             <div className="flex items-center space-x-2 text-slate-400">
               <Calendar className="h-4 w-4 text-sky-400 shrink-0" />
               <div className="flex flex-col">
-                <span className="text-[9px] text-slate-500 uppercase">Período</span>
-                <span className="font-semibold text-slate-300">
+                <span className="text-[9px] text-slate-500 uppercase font-mono">Período da Prova</span>
+                <span className="font-semibold text-slate-200">
                   {formatDateStr(tournament.startDate)} a {formatDateStr(tournament.endDate)}
                 </span>
               </div>
             </div>
 
             <div className="flex items-center space-x-2 text-slate-400">
-              <Users className="h-4 w-4 text-sky-400 shrink-0" />
+              <Users className="h-4 w-4 text-emerald-400 shrink-0" />
               <div className="flex flex-col">
-                <span className="text-[9px] text-slate-500 uppercase">Pescadores</span>
-                <span className="font-semibold text-slate-300">
+                <span className="text-[9px] text-slate-500 uppercase font-mono">Pescadores</span>
+                <span className="font-semibold text-slate-200">
                   {Array.isArray(tournament.participantCount) ? tournament.participantCount.length : (tournament.participantCount || 0)} inscritos
                 </span>
               </div>
@@ -222,6 +250,22 @@ export default function TournamentCard({ tournament, onParticipate, isLoggedIn }
             >
               <Lock className="h-4 w-4 text-rose-400" />
               <span>Inscrições Bloqueadas</span>
+            </button>
+          ) : regStatus.status === 'closed' ? (
+            <button
+              onClick={() => onParticipate(tournament)}
+              className="w-full bg-rose-950/60 hover:bg-rose-950/80 text-rose-300 hover:text-rose-200 font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl border border-rose-500/40 hover:border-rose-500/60 transition-all active:scale-[0.98] cursor-pointer text-center flex items-center justify-center gap-2 shadow-md"
+            >
+              <Lock className="h-4 w-4 text-rose-400" />
+              <span>Inscrições Encerradas</span>
+            </button>
+          ) : regStatus.status === 'not_started' ? (
+            <button
+              onClick={() => onParticipate(tournament)}
+              className="w-full bg-sky-950/60 hover:bg-sky-950/80 text-sky-300 hover:text-sky-200 font-bold text-xs sm:text-sm py-2.5 px-4 rounded-xl border border-sky-500/40 hover:border-sky-500/60 transition-all active:scale-[0.98] cursor-pointer text-center flex items-center justify-center gap-2 shadow-md"
+            >
+              <Clock className="h-4 w-4 text-sky-400" />
+              <span>Inscrições em Breve</span>
             </button>
           ) : (
             <button
