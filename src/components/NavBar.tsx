@@ -38,15 +38,15 @@ export default function NavBar({
           </div>
 
           {/* Main Navigation Menu */}
-          <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1.5 shrink min-w-0" aria-label="Navegação principal">
+          <nav className="hidden lg:flex items-center gap-1 xl:gap-2 shrink min-w-0 overflow-hidden" aria-label="Navegação principal">
             {/* 1. Início */}
             <button
               id="tab-home"
               onClick={() => setCurrentTab('home')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'home'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <Home className="h-3.5 w-3.5 shrink-0" />
@@ -59,8 +59,8 @@ export default function NavBar({
               onClick={() => setCurrentTab('tournaments')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'tournaments'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <Trophy className="h-3.5 w-3.5 shrink-0" />
@@ -73,8 +73,8 @@ export default function NavBar({
               onClick={() => setCurrentTab('how-to-participate')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'how-to-participate'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <HelpCircle className="h-3.5 w-3.5 shrink-0" />
@@ -88,8 +88,8 @@ export default function NavBar({
               onClick={() => setCurrentTab('ranking')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'ranking'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <Award className="h-3.5 w-3.5 shrink-0" />
@@ -102,8 +102,8 @@ export default function NavBar({
               onClick={() => setCurrentTab('champions')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'champions'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <Crown className="h-3.5 w-3.5 shrink-0" />
@@ -116,8 +116,8 @@ export default function NavBar({
               onClick={() => setCurrentTab('about')}
               className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'about'
-                  ? 'text-[#00c853]'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'text-[#00c853] bg-[#00c853]/10'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
               }`}
             >
               <Building2 className="h-3.5 w-3.5 shrink-0" />
@@ -130,52 +130,39 @@ export default function NavBar({
               <button
                 id="tab-admin"
                 onClick={() => setCurrentTab('admin')}
-                className={`inline-flex items-center space-x-1 px-2 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+                className={`inline-flex items-center space-x-1 px-2.5 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                   currentTab === 'admin'
-                    ? 'text-amber-400 font-extrabold bg-amber-500/15 border border-amber-500/30'
-                    : 'text-amber-400/90 hover:text-amber-300 hover:bg-slate-800/60'
+                    ? 'text-amber-300 font-extrabold bg-amber-500/20 border border-amber-500/50 shadow-sm shadow-amber-950/40'
+                    : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 border border-amber-500/25'
                 }`}
               >
                 <ShieldCheck className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                 <span className="whitespace-nowrap">ADMIN</span>
               </button>
             )}
-
-            {/* 6. Meu Perfil (Para Pescadores e Administradores) */}
-            {user && (
-              <button
-                id="tab-profile"
-                onClick={() => setCurrentTab('profile')}
-                className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
-                  currentTab === 'profile'
-                    ? 'text-[#00c853]'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <User className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap hidden xl:inline">MEU PERFIL</span>
-                <span className="whitespace-nowrap xl:hidden">PERFIL</span>
-              </button>
-            )}
           </nav>
 
           {/* User Profile Summary / Login Button */}
-          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+          <div className="flex items-center space-x-2 shrink-0">
             {user ? (
-              <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-                <div 
-                  className="flex items-center gap-1.5 sm:gap-2 cursor-pointer shrink-0"
-                  onClick={() => {
-                    setCurrentTab('profile');
-                  }}
-                  title="Ver e Editar Meu Perfil"
+              <div className="flex items-center space-x-2 shrink-0">
+                {/* User Profile Pill Button (clique abre Meu Perfil) */}
+                <button
+                  id="tab-profile-user-card"
+                  onClick={() => setCurrentTab('profile')}
+                  title="Meu Perfil - Clique para ver e editar"
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer select-none shrink-0 text-left ${
+                    currentTab === 'profile'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 shadow-sm shadow-emerald-950/40'
+                      : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-800/70'
+                  }`}
                 >
                   <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0 ${
                     user.role === 'admin' 
-                      ? 'border-amber-500/80 bg-amber-500/20 text-amber-300' 
+                      ? 'border-amber-400/80 bg-amber-500/25 text-amber-300' 
                       : user.role === 'moderator'
-                      ? 'border-sky-500/80 bg-sky-500/20 text-sky-300'
-                      : 'border-emerald-500/50 bg-[#1a1c20]'
+                      ? 'border-sky-400/80 bg-sky-500/25 text-sky-300'
+                      : 'border-emerald-400/80 bg-emerald-500/20 text-emerald-300'
                   }`}>
                     {user.photoURL ? (
                       <img src={user.photoURL} alt={user.displayName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
@@ -183,26 +170,29 @@ export default function NavBar({
                       (user.displayName || 'U').charAt(0).toUpperCase()
                     )}
                   </div>
-                  <div className="hidden sm:flex flex-col text-left shrink-0">
-                    <span className="text-xs font-black uppercase tracking-wide text-white hover:text-[#00c853] transition truncate max-w-[80px] xl:max-w-[120px] whitespace-nowrap">
+                  <div className="hidden sm:flex flex-col text-left leading-tight">
+                    <span className="text-[11px] sm:text-xs font-black uppercase tracking-wide text-white truncate max-w-[80px] xl:max-w-[120px] whitespace-nowrap block">
                       {user.displayName}
                     </span>
-                    {(user.role === 'admin' || user.role === 'moderator') ? (
-                      <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">
-                        ADMIN
-                      </span>
-                    ) : (
-                      <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider whitespace-nowrap">
-                        PESCADOR
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {(user.role === 'admin' || user.role === 'moderator') ? (
+                        <span className="text-[9px] font-mono text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">
+                          {user.role === 'admin' ? 'ADMIN' : 'MOD'}
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">
+                          PESCADOR
+                        </span>
+                      )}
+                      <span className="text-[9px] text-slate-400 font-mono hidden xl:inline">• Perfil</span>
+                    </div>
                   </div>
-                </div>
+                </button>
 
                 <button
                   onClick={onLogout}
                   title="Sair da conta"
-                  className="text-xs font-bold text-slate-400 hover:text-rose-400 uppercase tracking-wider transition cursor-pointer px-1.5 sm:px-2 py-1 rounded-lg hover:bg-slate-900 whitespace-nowrap shrink-0"
+                  className="text-xs font-bold text-slate-400 hover:text-rose-400 uppercase tracking-wider transition cursor-pointer px-2 py-1.5 rounded-lg hover:bg-slate-900 whitespace-nowrap shrink-0"
                 >
                   SAIR
                 </button>
