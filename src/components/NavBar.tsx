@@ -18,32 +18,32 @@ export default function NavBar({
   onLogout 
 }: NavBarProps) {
   return (
-    <header id="app-header" className="sticky top-0 z-40 w-full bg-[#0d0e11] border-b border-slate-800/80 backdrop-blur-md shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 sm:h-20">
+    <header id="app-header" className="sticky top-0 z-40 w-full max-w-full bg-[#0d0e11] border-b border-slate-800/80 backdrop-blur-md shadow-md overflow-x-clip">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16 sm:h-20 min-w-0">
           
           {/* Logo */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
             <div 
-              className="flex items-center space-x-2.5 cursor-pointer" 
+              className="flex items-center space-x-2 sm:space-x-2.5 cursor-pointer" 
               onClick={() => setCurrentTab('home')}
             >
-              <div className="p-2 bg-[#00c853] rounded-xl text-slate-950 shadow-md">
-                <Anchor className="h-5 w-5 stroke-[2.5]" />
+              <div className="p-1.5 sm:p-2 bg-[#00c853] rounded-xl text-slate-950 shadow-md">
+                <Anchor className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.5]" />
               </div>
-              <span className="text-xl font-black tracking-tight text-white flex items-center gap-1">
+              <span className="text-lg sm:text-xl font-black tracking-tight text-white flex items-center gap-1">
                 FISGADA <span className="text-[#00c853]">PRO</span>
               </span>
             </div>
           </div>
 
           {/* Main Navigation Menu */}
-          <nav className="hidden lg:flex items-center gap-1 xl:gap-2 shrink-0" aria-label="Navegação principal">
+          <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1.5 shrink min-w-0" aria-label="Navegação principal">
             {/* 1. Início */}
             <button
               id="tab-home"
               onClick={() => setCurrentTab('home')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'home'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
@@ -57,7 +57,7 @@ export default function NavBar({
             <button
               id="tab-tournaments"
               onClick={() => setCurrentTab('tournaments')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'tournaments'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
@@ -71,21 +71,22 @@ export default function NavBar({
             <button
               id="tab-how-to-participate"
               onClick={() => setCurrentTab('how-to-participate')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'how-to-participate'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
               <HelpCircle className="h-3.5 w-3.5 shrink-0" />
-              <span className="whitespace-nowrap">COMO PARTICIPAR</span>
+              <span className="whitespace-nowrap hidden xl:inline">COMO PARTICIPAR</span>
+              <span className="whitespace-nowrap xl:hidden">PARTICIPAR</span>
             </button>
 
             {/* 4. Ranking */}
             <button
               id="tab-ranking"
               onClick={() => setCurrentTab('ranking')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'ranking'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
@@ -99,7 +100,7 @@ export default function NavBar({
             <button
               id="tab-champions"
               onClick={() => setCurrentTab('champions')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'champions'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
@@ -113,14 +114,15 @@ export default function NavBar({
             <button
               id="tab-about"
               onClick={() => setCurrentTab('about')}
-              className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+              className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                 currentTab === 'about'
                   ? 'text-[#00c853]'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
               <Building2 className="h-3.5 w-3.5 shrink-0" />
-              <span className="whitespace-nowrap">QUEM SOMOS</span>
+              <span className="whitespace-nowrap hidden xl:inline">QUEM SOMOS</span>
+              <span className="whitespace-nowrap xl:hidden">SOBRE</span>
             </button>
 
             {/* Admin tab */}
@@ -128,7 +130,7 @@ export default function NavBar({
               <button
                 id="tab-admin"
                 onClick={() => setCurrentTab('admin')}
-                className={`inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+                className={`inline-flex items-center space-x-1 px-2 xl:px-3 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                   currentTab === 'admin'
                     ? 'text-amber-400 font-extrabold bg-amber-500/15 border border-amber-500/30'
                     : 'text-amber-400/90 hover:text-amber-300 hover:bg-slate-800/60'
@@ -144,30 +146,31 @@ export default function NavBar({
               <button
                 id="tab-profile"
                 onClick={() => setCurrentTab('profile')}
-                className={`inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
+                className={`inline-flex items-center space-x-1 px-2 xl:px-2.5 py-1.5 rounded-xl text-[11px] xl:text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap shrink-0 select-none cursor-pointer ${
                   currentTab === 'profile'
                     ? 'text-[#00c853]'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <User className="h-3.5 w-3.5 shrink-0" />
-                <span className="whitespace-nowrap">MEU PERFIL</span>
+                <span className="whitespace-nowrap hidden xl:inline">MEU PERFIL</span>
+                <span className="whitespace-nowrap xl:hidden">PERFIL</span>
               </button>
             )}
           </nav>
 
           {/* User Profile Summary / Login Button */}
-          <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
             {user ? (
-              <div className="flex items-center space-x-3 shrink-0">
+              <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
                 <div 
-                  className="flex items-center gap-2 cursor-pointer shrink-0"
+                  className="flex items-center gap-1.5 sm:gap-2 cursor-pointer shrink-0"
                   onClick={() => {
                     setCurrentTab('profile');
                   }}
                   title="Ver e Editar Meu Perfil"
                 >
-                  <div className={`w-8 h-8 rounded-full border flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0 ${
+                  <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border flex items-center justify-center text-white font-bold text-xs overflow-hidden shrink-0 ${
                     user.role === 'admin' 
                       ? 'border-amber-500/80 bg-amber-500/20 text-amber-300' 
                       : user.role === 'moderator'
@@ -180,8 +183,8 @@ export default function NavBar({
                       (user.displayName || 'U').charAt(0).toUpperCase()
                     )}
                   </div>
-                  <div className="flex flex-col text-left shrink-0">
-                    <span className="text-xs font-black uppercase tracking-wide text-white hover:text-[#00c853] transition truncate max-w-[120px] whitespace-nowrap">
+                  <div className="hidden sm:flex flex-col text-left shrink-0">
+                    <span className="text-xs font-black uppercase tracking-wide text-white hover:text-[#00c853] transition truncate max-w-[80px] xl:max-w-[120px] whitespace-nowrap">
                       {user.displayName}
                     </span>
                     {(user.role === 'admin' || user.role === 'moderator') ? (
@@ -199,7 +202,7 @@ export default function NavBar({
                 <button
                   onClick={onLogout}
                   title="Sair da conta"
-                  className="text-xs font-bold text-slate-400 hover:text-rose-400 uppercase tracking-wider transition cursor-pointer px-1.5 py-1 rounded-lg hover:bg-slate-900 whitespace-nowrap shrink-0"
+                  className="text-xs font-bold text-slate-400 hover:text-rose-400 uppercase tracking-wider transition cursor-pointer px-1.5 sm:px-2 py-1 rounded-lg hover:bg-slate-900 whitespace-nowrap shrink-0"
                 >
                   SAIR
                 </button>

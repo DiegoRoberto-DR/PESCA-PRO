@@ -133,7 +133,7 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-white">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-white w-full max-w-full overflow-x-hidden relative">
       {/* Navigation Header */}
       <NavBar 
         currentTab={currentTab} 
@@ -143,7 +143,7 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10 min-w-0">
         {/* Form to submit catch */}
         {isSubmitCatchOpen && currentUser ? (
           <SubmitCatchForm 
@@ -473,8 +473,8 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-[#0b0c0e] border-t border-slate-900/90 py-6 text-xs text-slate-500 font-mono mt-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+      <footer className="bg-[#0b0c0e] border-t border-slate-900/90 py-6 text-xs text-slate-500 font-mono mt-16 w-full max-w-full">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4 min-w-0">
           <div className="flex items-center space-x-2.5">
             <div className="p-1.5 bg-[#00c853] rounded-lg text-slate-950">
               <Anchor className="h-4 w-4 stroke-[2.5]" />
